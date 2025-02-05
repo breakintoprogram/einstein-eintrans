@@ -3,7 +3,7 @@
 ; Author:	Ste Ruddy
 ; Modified By:	Dean Belfeld
 ; Modified:	18/01/2025
-; Last Updated:	04/02/2025
+; Last Updated:	05/02/2025
 ;
 ; NB:
 ; To assemble: sjasmplus eintrans.z80 --raw=EINTRANS.COM
@@ -19,6 +19,7 @@ ZOUTC:	equ	0xCF	; Einstein MCAL command for print text
 
 FBUF:	equ	0x0080	; File buffer address
 FBUF_S:	equ	0x0080	; File buffer size
+SBUF:	equ	0x0b00	; Sector buffer address
 
 PHYDSC:	equ	0xFB50	; Current physical drive number
 PHYTRK:	equ	0xFB51	; Current physical drive track number
@@ -243,7 +244,7 @@ cmd_putdisk:
 	ld (var_numsectors),a	;02dc	32 df 08
 	call com_readst		;02df	cd 8d 07
 	ld (var_08e0h),a	;02e2	32 e0 08
-	ld hl,00b00h		;02e5	21 00 0b
+	ld hl,SBUF		;02e5	21 00 0b
 	ld bc,00000h		;02e8	01 00 00
 	ld a,(PHYDSC)		;02eb	3a 50 fb	Select the physical disk
 	call setdisk		;02ee	cd 02 08
@@ -253,7 +254,7 @@ cmd_putdisk:
 1:	call com_readst		;02f5	cd 8d 07 	Read a byte in from the PC
 	cp 002h			;02f8	fe 02 	 
 	jr z,6F			;02fa	28 44 		If it is 2 then exit the loop, finished
-	ld hl,00b00h		;02fc	21 00 0b 	Set the disk buffer area to 00b00h
+	ld hl,SBUF		;02fc	21 00 0b 	Set the disk buffer area 
 	ld (PHYBUF),hl		;02ff	22 53 fb 
 	ld hl,var_08e1h		;0302	21 e1 08
 	ld a,(var_08e0h)	;0305	3a e0 08 
@@ -282,7 +283,7 @@ cmd_putdisk:
 	jr 2B			;0328	18 df 	 
 4:
 	call sub_0676h		;032a	cd 76 06 
-	ld hl,00b00h		;032d	21 00 0b 
+	ld hl,SBUF		;032d	21 00 0b 
 	ld a,(var_08e0h)	;0330	3a e0 08
 	ld b,a			;0333	47
 5:
@@ -309,7 +310,7 @@ cmd_getdisk:
 	ld (var_numsectors),a	;0375	32 df 08	; Number of sectors
 	call com_readst		;0378	cd 8d 07
 	ld (var_08e0h),a	;037b	32 e0 08
-	ld hl,00b00h		;037e	21 00 0b
+	ld hl,SBUF		;037e	21 00 0b
 	ld bc,00000h		;0381	01 00 00
 	ld a,(PHYDSC)		;0384	3a 50 fb
 	call setdisk		;0387	cd 02 08
@@ -319,7 +320,7 @@ cmd_getdisk:
 	call com_readst		;038f	cd 8d 07 	 
 	cp 002h			;0392	fe 02 	 
 	jr z,6F			;0394	28 45 	
-	ld hl,00b00h		;0396	21 00 0b 	  
+	ld hl,SBUF		;0396	21 00 0b 	  
 	ld a,(var_08e0h)	;0399	3a e0 08 	  
 	ld b,a			;039c	47 
 2:
@@ -328,7 +329,7 @@ cmd_getdisk:
 	call com_readbuf	;03a1	cd c6 06 	 
 	pop bc			;03a4	c1 	
 	djnz 2B			;03a5	10 f6 	 
-	ld hl,00b00h		;03a7	21 00 0b 	 
+	ld hl,SBUF		;03a7	21 00 0b 	 
 	ld (PHYBUF),hl		;03aa	22 53 fb 
 	ld a,(var_08e0h)	;03ad	3a e0 08   
 	ld b,a			;03b0	47 	 
@@ -391,79 +392,87 @@ mos_nextsector:
 ; Command: DIR
 ;
 cmd_getdir:
-	call com_readst		;0424	cd 8d 07 	 
-	push af			;0427	f5 
-	add a,030h		;0428	c6 30 	
-	ld (00445h),a		;042a	32 45 04 
-	MCAL	ZOUTC
+	call com_readst		;0424	cd 8d 07 	Read in the drive number 
+	push af			;0427	f5 		Stack it
+	add a,030h		;0428	c6 30 		Self-mod the message
+	ld (cmd_getdir1),a	;042a	32 45 04 
+	MCAL	ZOUTC		;			It seems to be incorrectly output as track number
 	DB	CR 
-	DB	" - Reading DIR track ?",":"+0x80
-	call com_readst		;0447	cd 8d 07 	 
-	ld c,a			;044a	4f 
-	call com_readst		;044b	cd 8d 07 	 
+	DB	" - Reading DIR track "
+cmd_getdir1:
+	DB 	"?",":"+0x80
+	call com_readst		;0447	cd 8d 07 	Read track number from the PC
+	ld c,a			;044a	4f
+	call com_readst		;044b	cd 8d 07 	Read number of sectors to fetch from the PC
 	ld d,000h		;044e	16 00 	 
-	ld e,a			;0450	5f 	
-	pop af			;0451	f1 	
-	ld hl,00b00h		;0452	21 00 0b 	 
-	ld b,000h		;0455	06 00 	 
-	call setdisk		;0457	cd 02 08 	 
-	ld b,e			;045a	43 	
-	push de			;045b	d5 	
-1:
-	push bc			;045c	c5 	
+	ld e,a			;0450	5f 		DE: Number of sectors
+	pop af			;0451	f1		 A: Drive number
+	ld hl,SBUF		;0452	21 00 0b 	HL: Disk buffer area
+	ld b,000h		;0455	06 00 	 	BC: Track number (C read from PC)
+	call setdisk		;0457	cd 02 08 	Set up the OS
+	ld b,e			;045a	43		 B: The loop counter (number of sectors to read)
+	push de			;045b	d5 		Stack number of sectors
+;
+1:	push bc			;045c	c5 		Stack loop counter
 	xor a			;045d	af  
-	ld (STATUS),a		;045e	32 56 fb 	
-	MCAL ZRSECT
-	ld a,(PHYSEC)		;0463	3a 52 fb 	
+	ld (STATUS),a		;045e	32 56 fb 	Clear the status flag
+	MCAL ZRSECT		;			Read in a 512 byte sector
+	ld a,(PHYSEC)		;0463	3a 52 fb 	Increment the sector
 	inc a			;0466	3c 	
 	ld (PHYSEC),a		;0467	32 52 fb 	
-	ld a,(STATUS)		;046a	3a 56 fb 	
+	ld a,(STATUS)		;046a	3a 56 fb 	Check the status
 	or a			;046d	b7 	
-	jr z,l0480h		;046e	28 10 	
-	MCAL ZFDRST
-	ld hl,(PHYBUF)		;0472	2a 53 fb
+	jr z,cmd_getdir2	;046e	28 10 		If there are no errors, then branch here
+;	
+	MCAL ZFDRST		;			Otherwise reset the FDC
+	ld hl,(PHYBUF)		;0472	2a 53 fb	Clear out the buffer 
 	push hl			;0475	e5 	
 	pop de			;0476	d1 	
 	inc de			;0477	13 	
-	ld bc,001ffh		;0478	01 ff 01 	 
-	ld a,0e5h		;047b	3e e5 	
+	ld bc,001ffh		;0478	01 ff 01 
+	ld a,0e5h		;047b	3e e5 		Fill with 0e5h (erased file entry marker)	
 	ld (hl),a		;047d	77 	
 	ldir			;047e	ed b0 	 
-l0480h:
-	ld a,(PHYBUF+1)		;0480	3a 54 fb 
-	inc a			;0483	3c 	 
+;
+cmd_getdir2:
+	ld a,(PHYBUF+1)		;0480	3a 54 fb 	Get the high byte of the buffer
+	inc a			;0483	3c 	 	Increment by 512
 	inc a			;0484	3c 	
 	ld (PHYBUF+1),a		;0485	32 54 fb 
-	pop bc			;0488	c1 	 
-	djnz 1B			;0489	10 d1 	 
+	pop bc			;0488	c1 	 	Pop the loop counter
+	djnz 1B			;0489	10 d1 	 	Loop
+;				;			Print the success message
 	MCAL	ZOUTC 
 	DB	CR 
 	DB	" - Sending DIR entries"," "+0x80
-	pop hl			;04a5	e1 
-	add hl,hl		;04a6	29 
-	add hl,hl		;04a7	29 
+;	
+	pop hl			;04a5	e1 		Pop the number of sectors
+	add hl,hl		;04a6	29 		Multiply by 16
+	add hl,hl		;04a7	29
 	add hl,hl		;04a8	29 
 	add hl,hl		;04a9	29 
 	push hl			;04aa	e5 
-	pop de			;04ab	d1 
-	ld hl,00b00h		;04ac	21 00 0b 	
-1:
-	ld a,(hl)		;04af	7e 	
-	cp 0e5h			;04b0	fe e5 	 
-	jr z,2F			;04b2	28 0f 	 
-	ld a,000h		;04b4	3e 00 	 
+	pop de			;04ab	d1 		DE: Number of sectors x 16, E will be number of entries to read
+	ld hl,SBUF		;04ac	21 00 0b 	HL: Disk buffer area
+;
+1:	ld a,(hl)		;04af	7e 		Get the first byte of the directory
+	cp 0e5h			;04b0	fe e5 	 	Is it an erased or non-existent file?
+	jr z,2F			;04b2	28 0f 	 	Yes, so skip
+;
+	ld a,000h		;04b4	3e 00 	 	Send 0 back to the PC
 	call com_writest	;04b6	cd ae 07 	 
 	push hl			;04b9	e5 	 
-	ld bc,00010h		;04ba	01 10 00 	 
+	ld bc,00010h		;04ba	01 10 00 	Followed by the directory entry (16 bytes)
 	call com_writebuf	;04bd	cd 7f 06
 	pop hl			;04c0	e1 
-	ld b,000h		;04c1	06 00 	 
-2:
-	ld c,020h		;04c3	0e 20 	
-	add hl,bc		;04c5	09 	
-	dec e			;04c6	1d 	
-	jr nz,1B		;04c7	20 e6 	
-	ld a,002h		;04c9	3e 02 	
+	ld b,000h		;04c1	06 00
+;
+2:	ld c,020h		;04c3	0e 20
+	add hl,bc		;04c5	09		Skip 32 bytes (the size of each directory entry in CP/M	
+	dec e			;04c6	1d 		Decrement the counter
+	jr nz,1B		;04c7	20 e6 		And loop
+;
+	ld a,002h		;04c9	3e 02 		Send a 2 back to the PC to indicate completion
 	call com_writest	;04cb	cd ae 07 	 
 	MCAL	ZOUTC
 	DB	CR 
@@ -1083,7 +1092,7 @@ dispfile_1:
 	ld b,003h		;0893	06 03 	 	Size of the extension
 1:	inc de			;0895	13 		Increment the pointer (also skips the dot)
 	ld a,(hl)		;0896	7e 		Fetch the character
-	and 07fh		;0897	e6 7f 		Make sure it's in the ASCII range
+	and 07fh		;0897	e6 7f 		The MSB of the extension is used by CP/M - strip this off
 	ld (de),a		;0899	12 		Store it
 	inc hl			;089a	23 		Skip to the next character
 	djnz 1B			;089b	10 f8 	 	And loop
