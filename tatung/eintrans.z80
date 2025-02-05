@@ -17,6 +17,9 @@ ZWSECT:	equ	0xA3	; Write a single 512-byte sector to the disk
 ZFDRST:	equ	0xBD	; Reset and initialise the FDC and PSG, deselect any enabled drives.
 ZOUTC:	equ	0xCF	; Einstein MCAL command for print text
 
+FBUF:	equ	0x0080	; File buffer address
+FBUF_S:	equ	0x0080	; File buffer size
+
 PHYDSC:	equ	0xFB50	; Current physical drive number
 PHYTRK:	equ	0xFB51	; Current physical drive track number
 PHYSEC:	equ	0xFB52	; Current physical drive sector number
@@ -55,9 +58,9 @@ start:	ld sp,	00affh		;0100	31 ff 0a
 ; Warm start
 ;
 warm:
-	ld sp,00affh		;014e	31 ff 0a 	1  
-	call com_flush		;0151	cd 70 07 	. p . 
-	call dos_setbuf		;0154	cd 68 07 	. h . 
+	ld sp,00affh		;014e	31 ff 0a 
+	call com_flush		;0151	cd 70 07 	Flush the serial port
+	call dos_setbuf		;0154	cd 68 07  	Initialise the file buffer
 ;
 ; Wait for input from the serial port
 ;
@@ -120,7 +123,7 @@ cmdtab:
 	DB 0x44: DW cmd_getdrvcfg	; Get the drive config
 	DB 0x24: DW cmd_getdir		; Get the directory entries
 	DB 0x42: DW cmd_getdpb		; Get the disk parameter block
-	DB 0x53: DW cmd_setdisc		; 
+	DB 0x53: DW cmd_setdisc		; Set the current disk number
 	DB 0x45: DW cmd_exec		; Execute
 	DB 0x58: DW 0x0000		; Cold reset
 	DB 0xFF
@@ -154,7 +157,7 @@ doscall_2:
 	call doscall_1		;01fd	cd e0 01 
 	jp warm			;0200	c3 4e 01 
 
-; Send a file to the PC
+; Command: Send a file to the PC
 ;
 cmd_putfile:	
 	call com_getfilename	;0203	cd 5c 06 	Get the filename from the PC	
@@ -176,8 +179,8 @@ cmd_putfile:
 	jr nz,3F		;0234	20 10 	 	Skip to next bit if EOF	
 	ld a,000h		;0236	3e 00 		Return code 0 back to the PC
 	call com_writest	;0238	cd ae 07 	
-	ld hl,00080h		;023b	21 80 00 	Where to store the block	
-	ld bc,00080h		;023e	01 80 00 	Number of bytes to read out
+	ld hl,FBUF		;023b	21 80 00 	Where to store the block	
+	ld bc,FBUF_S		;023e	01 80 00 	Number of bytes to read out
 	call com_writebuf	;0241	cd 7f 06 	Write it out to the PC
 	jr 2B			;0244	18 eb 	 	Loop until finished
 ;
@@ -189,7 +192,7 @@ cmd_putfile:
 	call dos_closefile	;025c	cd 27 07 	Close the file
 	jp wait			;025f	c3 57 01 	Jump back to the main loop
 
-; Get a file from the PC
+; Command: Get a file from the PC
 ;
 cmd_getfile:
 	call com_getfilename	;0262	cd 5c 06 	Get the filename from the PC	
@@ -210,8 +213,8 @@ cmd_getfile:
 	MCAL	ZOUTC		;			Display success message
 	DB	"Receivin","g"+0x80
 ;
-3:	ld hl,00080h		;029a	21 80 00 	Pointer to the file buffer
-	ld bc,00080h		;029d	01 80 00 	Size of file buffer
+3:	ld hl,FBUF		;029a	21 80 00 	Pointer to the file buffer
+	ld bc,FBUF_S		;029d	01 80 00 	Size of file buffer
 	call com_readbuf	;02a0	cd c6 06 	Read the file from the PC
 	call dos_writefile	;02a3	cd 1d 07 	Write it out to the file
 	or a			;02a6	b7 	 	If there has been a write error (disk full)
@@ -229,40 +232,42 @@ cmd_getfile:
 	call dos_closefile	;02c7	cd 27 07 	Close the file
 	jp wait			;02ca	c3 57 01 	Jump back to the main loop
 
+; Command: Write a disk image to the PC
+;
 cmd_putdisk:
-	call com_readst		;02cd	cd 8d 07 	 
+	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 	ld (PHYDSC),a		;02d0	32 50 fb
-	call com_readst		;02d3	cd 8d 07
+	call com_readst		;02d3	cd 8d 07	
 	ld (var_08deh),a	;02d6	32 de 08
 	call com_readst		;02d9	cd 8d 07
-	ld (var_08dfh),a	;02dc	32 df 08
+	ld (var_numsectors),a	;02dc	32 df 08
 	call com_readst		;02df	cd 8d 07
 	ld (var_08e0h),a	;02e2	32 e0 08
 	ld hl,00b00h		;02e5	21 00 0b
 	ld bc,00000h		;02e8	01 00 00
-	ld a,(PHYDSC)		;02eb	3a 50 fb
+	ld a,(PHYDSC)		;02eb	3a 50 fb	Select the physical disk
 	call setdisk		;02ee	cd 02 08
-	xor a			;02f1	af 	
-	call dispdiskop		;02f2	cd 0d 08 	 
-1:
-	call com_readst		;02f5	cd 8d 07 	 
+	xor a			;02f1	af 		Read prefix
+	call dispdiskop		;02f2	cd 0d 08 	Display the disk operation
+;
+1:	call com_readst		;02f5	cd 8d 07 	Read a byte in from the PC
 	cp 002h			;02f8	fe 02 	 
-	jr z,6F			;02fa	28 44 
-	ld hl,00b00h		;02fc	21 00 0b 
+	jr z,6F			;02fa	28 44 		If it is 2 then exit the loop, finished
+	ld hl,00b00h		;02fc	21 00 0b 	Set the disk buffer area to 00b00h
 	ld (PHYBUF),hl		;02ff	22 53 fb 
-	ld hl,var_08e1h		;0302	21 e1 08 
+	ld hl,var_08e1h		;0302	21 e1 08
 	ld a,(var_08e0h)	;0305	3a e0 08 
 	ld b,a			;0308	47 	
-2:
-	xor a			;0309	af 	
-	call dispdiskop		;030a	cd 0d 08 	 
-3:
-	push bc			;030d	c5 	
+;
+2:	xor a			;0309	af 		Read prefix
+	call dispdiskop		;030a	cd 0d 08 	Display the disk operation
+;
+3:	push bc			;030d	c5 	
 	push hl			;030e	e5 	 
 	xor a			;030f	af 	 
-	ld (STATUS),a		;0310	32 56 fb 	
-	MCAL ZRSECT
-	call sub_0402h		;0315	cd 02 04 	 
+	ld (STATUS),a		;0310	32 56 fb 	Clear the status byte
+	MCAL ZRSECT		;			Read a single 512-byte sector in
+	call mos_nextsector	;0315	cd 02 04 	Skip to the next sector 
 	pop hl			;0318	e1 	
 	pop bc			;0319	c1 	 
 	ld (hl),a		;031a	77 	 
@@ -287,19 +292,21 @@ cmd_putdisk:
 	pop bc			;033b	c1 
 	djnz 5B			;033c	10 f6 	 
 	jr 1B			;033e	18 b5 	 
-6:
-	MCAL	ZOUTC
+;
+6:	MCAL	ZOUTC		;			Display the success message
 	DB	CR
 	DB	" + DISC read and sent         ",LF,CR+0x80
-	jp wait			;0363	c3 57 01 	
+	jp wait			;0363	c3 57 01 	Jump back to the main loop
 
+; Command: Get a disk image from the PC
+;
 cmd_getdisk:
 	call com_readst		;0366	cd 8d 07
 	ld (PHYDSC),a		;0369	32 50 fb
 	call com_readst		;036c	cd 8d 07
 	ld (var_08deh),a	;036f	32 de 08
 	call com_readst		;0372	cd 8d 07
-	ld (var_08dfh),a	;0375	32 df 08
+	ld (var_numsectors),a	;0375	32 df 08	; Number of sectors
 	call com_readst		;0378	cd 8d 07
 	ld (var_08e0h),a	;037b	32 e0 08
 	ld hl,00b00h		;037e	21 00 0b
@@ -334,8 +341,8 @@ cmd_getdisk:
 	push bc			;03ba	c5
 	xor a			;03bb	af
 	ld (STATUS),a		;03bc	32 56 fb 	
-	MCAL ZWSECT
-	call sub_0402h		;03c1	cd 02 04 	 
+	MCAL ZWSECT		;			Write a single 512-byte sector out
+	call mos_nextsector	;03c1	cd 02 04 	Skip to the next sector 
 	pop bc			;03c4	c1 
 	pop hl			;03c5	e1 
 	ld (hl),a		;03c6	77 
@@ -357,28 +364,32 @@ cmd_getdisk:
 	DB	" + DISC received and written   ",LF,CR+0x80
 	jp wait			;03ff	c3 57 01 
 
-sub_0402h:
-	ld a,(var_08dfh)	;0402	3a df 08 
-	ld hl,(PHYTRK)		;0405	2a 51 fb 
-	inc h			;0408	24 	
-	cp h			;0409	bc 	 
+; Move the drive onto the next sector, track
+;
+mos_nextsector:
+	ld a,(var_numsectors)	;0402	3a df 08 	Get number of sectors
+	ld hl,(PHYTRK)		;0405	2a 51 fb 	Get current sector (H) and track (L)
+	inc h			;0408	24 		Increment sector
+	cp h			;0409	bc 	 	If it is equal to last sector on drive then
 	jr nz,1F		;040a	20 03 	   
-	ld h,000h		;040c	26 00 	 
-	inc l			;040e	2c 	 
-1:
-	ld (PHYTRK),hl		;040f	22 51 fb 
-	ld a,(PHYBUF+1)		;0412	3a 54 fb 
-	inc a			;0415	3c 	
+	ld h,000h		;040c	26 00 	 	Zero the sector
+	inc l			;040e	2c 	 	Increment the track
+1:	ld (PHYTRK),hl		;040f	22 51 fb 	Store it back in the scratchpad
+;
+	ld a,(PHYBUF+1)		;0412	3a 54 fb 	Get the buffer high byte
+	inc a			;0415	3c 		Increment 2 pages (512 bytes)
 	inc a			;0416	3c 	 
-	ld (PHYBUF+1),a		;0417	32 54 fb 
-	ld a,(STATUS)		;041a	3a 56 fb 
+	ld (PHYBUF+1),a		;0417	32 54 fb 	Store back in
+	ld a,(STATUS)		;041a	3a 56 fb 	Get the status
 	or a			;041d	b7 
-	ret z			;041e	c8 
-	push af			;041f	f5 
-	MCAL ZFDRST
+	ret z			;041e	c8 		Return if there are no issues
+	push af			;041f	f5 		Otherwise
+	MCAL ZFDRST		;			Reset and initialise the FDC and PSG, deselect any enabled drives
 	pop af			;0422	f1 
 	ret			;0423	c9 
 
+; Command: DIR
+;
 cmd_getdir:
 	call com_readst		;0424	cd 8d 07 	 
 	push af			;0427	f5 
@@ -457,55 +468,61 @@ l0480h:
 	MCAL	ZOUTC
 	DB	CR 
 	DB	" + DIR track ","-"+0x80
-msent:
+msent:				;			Output the success error message
 	MCAL	ZOUTC 
 	DB	" Sent    ",CR,LF+0x80
-	jp wait			;04ec	c3 57 01 	
+	jp wait			;04ec	c3 57 01 	Jump back to the main loop
 
-; Get the drive config
+; Command: Get the drive config
 ;
 cmd_getdrvcfg;
-	MCAL	ZOUTC 
+	MCAL	ZOUTC 		;			Write out a message
 	DB	CR 
 	DB	" + DRIVE config ","%"+0x80
-	ld a,(SIDFLG)		;0503	3a b1 fb 
-	call com_writest	;0506	cd ae 07 
+	ld a,(SIDFLG)		;0503	3a b1 fb 	Get the double-sided flag
+	call com_writest	;0506	cd ae 07 	Write it out to the PC
 	ld a,(SIDFLG)		;0509	3a b1 fb 
-	call tobin		;050c	cd 74 08 
-	jr msent		;050f	18 ce 	
+	call tobin		;050c	cd 74 08 	Output it as binary
+	jr msent		;050f	18 ce 		Output the success message and jump back to the main loop
 
+; Command: Get the drive parameter address
+;
 cmd_getdpb:
-	MCAL	ZOUTC 
+	MCAL	ZOUTC 		;			Write out a message
 	DB	CR 
 	DB	" + DP","B"+0x80
-	call dos_getdpb
-	ld bc,0000fh		;051d	01 0f 00 	 
-	call com_writebuf	;0520	cd 7f 06 
-	jr msent		;0523	18 ba 	 
+	call dos_getdpb		;			Get the DPB in HL
+	ld bc,0000fh		;051d	01 0f 00 	The DPB is 15 bytes long	 
+	call com_writebuf	;0520	cd 7f 06 	Write it to the PC
+	jr msent		;0523	18 ba 	 	Output the success message and jump back to the main loop
 
+; Command: Set the current disk number
+;
 cmd_setdisc:
-	call com_readst		;0525	cd 8d 07 	 
-	push af			;0528	f5 	
-	add a,030h		;0529	c6 30 	
-	ld (cmd_setdisc1),a	;052b	32 3d 05 	
-	MCAL	ZOUTC
+	call com_readst		;0525	cd 8d 07 	Read the disk number from the PC 
+	push af			;0528	f5 		Stack the drive number
+	add a,030h		;0529	c6 30 		Change it to a digit for display
+	ld (cmd_setdisc1),a	;052b	32 3d 05 	Self-mod the message
+	MCAL	ZOUTC		;			Display the selected disk number
 	DB	CR 
 	DB	" + Set DISC "
 cmd_setdisc1:
 	DB	"0:"," "+0x80
 	pop	af 
-	call dos_seldrv		;0541	cd 60 07 	
-	jr z,1F			;0544	28 0e 
-	ld a,000h		;0546	3e 00 
+	call dos_seldrv		;0541	cd 60 07 	Set the selected drive
+	jr z,1F			;0544	28 0e 		Skip to error if invalid drive
+;
+	ld a,000h		;0546	3e 00 		Send code 0 back to the PC
 	call com_writest	;0548	cd ae 07 	 
-	MCAL	ZOUTC 
+	MCAL	ZOUTC 		;			Display the success message
 	DB	"Ok",CR,LF+0x80
-	jp wait			;0551	c3 57 01 
-1:	ld a,001h		;0554	3e 01 
+	jp wait			;0551	c3 57 01 	Jump back to the main loop
+;
+1:	ld a,001h		;0554	3e 01 		Send code 1 back to the PC
 	call com_writest	;0556	cd ae 07 	 
-	MCAL	ZOUTC 
+	MCAL	ZOUTC 		;			Display the failed error message
 	DB	"Failed",CR,LF+0x80
-	jp wait			;0563	c3 57 01 
+	jp wait			;0563	c3 57 01 	Jump back to the main loop
 
 ; Command: Execute
 ;
@@ -536,7 +553,7 @@ cmd_exec:
 	call com_readbuf	;059d	cd c6 06 	 
 	pop bc			;05a0	c1 	 
 	djnz 1B			;05a1	10 f6 	 
-	ld hl,00080h		;05a3	21 80 00	Read another 32 bytes in
+	ld hl,FBUF		;05a3	21 80 00	Read another 32 bytes in
 	ld bc,00020h		;05a6	01 20 00 	
 	call com_readbuf	;05a9	cd c6 06 	 
 	MCAL	ZOUTC		;			Display a message
@@ -837,17 +854,20 @@ dos_getdpb:
 	ld c,01fh		;075b	0e 1f 	 	Get drive parameter address
 	jp doscall		;075d	c3 da 01 	 
 
+; Select the drive number
 ;  A: Drive number
+; Returns
+; - F: Z if invalid drive, otherwise NZ
 ;
 dos_seldrv:
 	ld e,a			;0760	5f
 	ld c,00eh		;0761	0e 0e 	 	Select drive
 	call doscall		;0763	cd da 01 	 
-	inc a			;0766	3c
+	inc a			;0766	3c		
 	ret			;0767	c9 	
 
 dos_setbuf:
-	ld de,00080h		;0768	11 80 00 	FDESC address
+	ld de,FBUF		;0768	11 80 00 	FDESC address
 	ld c,01ah		;076b	0e 1a 	 	Set buffer address
 	jp DOS			;076d	c3 05 00 	 
 
@@ -1094,7 +1114,7 @@ var_file2:	DS	16,0	; FDESC
 		DS	1 ,0	; ?
 
 var_08deh:	DB	0
-var_08dfh:	DB	0
+var_numsectors:	DB	0
 var_08e0h:	DB	0
 var_08e1h:	DS	7,0
 var_08e8h:	DS	3,0
