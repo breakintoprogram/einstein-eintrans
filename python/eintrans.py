@@ -3,9 +3,10 @@
 # Title:		EinTrans
 # Author:		Dean Belfield
 # Created:		05/02/2025
-# Last Updated:	05/02/2025
+# Last Updated:	06/02/2025
 #
 # Modinfo:
+# 06/02/2025:	Added file transfer methods
 
 import serial
 import time
@@ -15,13 +16,18 @@ port = '/dev/ttyWCH0'
 # Class to create a file object
 #
 class File:
-	def __init__(self, buffer):
-		filename = buffer[1:9].decode()
-		extension = bytearray(b & 0x7F for b in buffer[9:12]).decode()
-		self.filename = f"{filename}.{extension}" 
+	def __init__(self, drive, buffer):
+		self.drive = drive
+		self.user = buffer[0]
+		self.filename = buffer[1:9].decode().rstrip()
+		self.extension = bytearray(b & 0x7F for b in buffer[9:12]).decode()
+		self.readOnly = bool(buffer[9] & 0x80)
+		self.hidden = bool(buffer[10] & 0x80)
+		self.archived = bool(buffer[11] & 0x80)
+		self.size = buffer[15] * 128 				# TODO This is probably incorrect
 	
 	def __repr__(self):
-		return self.filename
+		return f"{self.drive}:{self.filename}.{self.extension} [{self.size}]"
 
 # Class to wrap the serial port
 #
@@ -62,12 +68,17 @@ class Protocol(RS232):
 	# Send a command
 	#
 	def sendCmd(self, cmd, *args):
-		self.flush()
 		self.writeByte(0x2A)
 		self.writeByte(0x21)
 		self.writeByte(cmd)
 		for item in args:
 			self.writeByte(item)
+
+	# Send a string
+	#
+	def sendStr(self, string):
+		for char in string:
+			self.writeByte(ord(char))
 
 	# Read buffer
 	#
@@ -84,12 +95,28 @@ class Protocol(RS232):
 			if tcs == rcs:					# If the checksums match
 				return data					# Return the data
 		return None							# In all other cases, return None
+	
+	# Send buffer
+	# 
+	def sendBuffer(self, buffer):
+		self.writeByte(0)					# Flag we are not filling
+		self.write(buffer)					# Write out the buffer
+		rcs = self.readByte()				# Get the checksum
+		tcs = sum(buffer)%0x100				# Our checksum
+		self.writeByte(tcs)					# Return our checksum
+		return tcs == rcs
+
+	# Fill buffer
+	#
+	def fillBuffer(self, byte):
+		self.writeByte(3)		
+		self.writeByte(byte)				# Byte to fill buffer with, count determined by Einstein
 
 # Class to wrap the EinTrans functionality around the protocol
 #
 class Transfer(Protocol):
-	def __init__(self, port, baudrate, bytesize, parity, stopbits, timeout = None):
-		super().__init__(port, baudrate, bytesize, parity, stopbits, timeout)
+	def __init__(self, port):
+		super().__init__(port, 9600, 8, "N", 2, 10)
 
 	def reset(self):
 		self.sendCmd(0x25)
@@ -111,35 +138,66 @@ class Transfer(Protocol):
 		res = s.setDisc(drive)
 		if res != 0:
 			return None
-
 		dir = []
-		cfg = s.getDriveConfig()
-		dpb = s.getDPB()
+		dpb = self.getDPB()
 		entries = int.from_bytes(dpb[7:8]) + 1
 		track = int.from_bytes(dpb[13:14])
-		self.sendCmd(0x24, drive, track, entries >> 4)
-		
+		self.sendCmd(0x24, drive, track, entries >> 4)		
 		while True:
 			result = self.readByte()
 			if result == 0:
 				buffer = self.getBuffer(0x10)
 				if buffer[0] == 0:
-					dir.append(File(buffer))
+					dir.append(File(drive, buffer))
 			else:
 				break 
-
 		return dir
-
-
-# Configure serial port here. Last parameter is timeout to stop reading data, in seconds: 
+	
+	def getFile(self, drive, filename, extension):
+		self.sendCmd(0x52)
+		self.sendStr(f"{drive}{filename.ljust(8)}{extension}")
+		res = self.readByte()
+		if res != 0:
+			return None 
+		fh = open(f"{filename}.{extension}", 'wb')		
+		while True:
+			res = self.readByte()
+			if res != 0:
+				break 
+			buffer = self.getBuffer(0x80)
+			fh.write(buffer)
+		fh.close()
+		return res
+	
+	def putFile(self, drive, filename, extension):
+		fh = open(f"{filename}.{extension}", 'rb')
+		self.sendCmd(0x57)
+		self.sendStr(f"{drive}{filename.ljust(8)}{extension}")
+		res = self.readByte()
+		if res != 0:
+			return None
+		while True:
+			buffer = fh.read(0x80)
+			self.sendBuffer(buffer.ljust(0x80, b"\0"))
+			res = self.readByte()
+			if len(buffer) < 0x80:
+				self.writeByte(2)
+				break
+			else:
+				self.writeByte(0)
+		fh.close()
+		return res
+	
+# Test code
 #
-s = Transfer(port, 9600, 8, "N", 2, 10)
+s = Transfer(port)	# Open the serial port
 
-drive = 0
+res = s.reset()		# Send a reset command to EinTrans
+dir = s.getDIR(0)	# Get the directory of drive 0
 
-result = s.reset()
+# Iterate through the directory and get the files from the Einstein
+#
+for file in dir:
+	s.getFile(file.drive, file.filename, file.extension)
 
-dir = s.getDIR(drive)
-print(dir)
-
-s.close()
+s.close()			# Close the serial port
