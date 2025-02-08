@@ -17,18 +17,16 @@ port = '/dev/ttyWCH0'
 #
 class DPB:
 	def __init__(self, buffer):
-		self.logicalSectorsPerTrack = int.from_bytes(buffer[0:1])
+		self.logicalSectorsPerTrack = buffer[0] + (buffer[6] << 1)
 		self.blockShift = buffer[2]
 		self.blockMask = buffer[3]
 		self.blockingFlag = buffer[4]
-		self.diskSize = int.from_bytes(buffer[5:6])
-		self.directoryEntries = int.from_bytes(buffer[7:8]) + 1
-		self.allocMap = int.from_bytes(buffer[9:10])
-		self.checkVector = int.from_bytes(buffer[11:12])
-		self.systemTracks = int.from_bytes(buffer[13:14])
+		self.diskSize = buffer[5] + (buffer[6] << 8)
+		self.directoryEntries = buffer[7] + (buffer[8] << 8) + 1
+		self.allocMap = buffer[9] + (buffer[10] << 8)
+		self.checkVector = buffer[11] + (buffer[12] << 8)
+		self.systemTracks = buffer[13] + (buffer[14] << 8)
 
-	# TODO This works for 3" drives, but not the Gotek 790K image
-	#
 	def getSize(self):
 		return ((self.diskSize + 1) << self.blockShift) * 128
 
