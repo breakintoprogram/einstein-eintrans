@@ -13,6 +13,25 @@ import time
 
 port = '/dev/ttyWCH0'
 
+# Class to create a DPB object
+#
+class DPB:
+	def __init__(self, buffer):
+		self.logicalSectorsPerTrack = int.from_bytes(buffer[0:1])
+		self.blockShift = buffer[2]
+		self.blockMask = buffer[3]
+		self.blockingFlag = buffer[4]
+		self.diskSize = int.from_bytes(buffer[5:6])
+		self.directoryEntries = int.from_bytes(buffer[7:8]) + 1
+		self.allocMap = int.from_bytes(buffer[9:10])
+		self.checkVector = int.from_bytes(buffer[11:12])
+		self.systemTracks = int.from_bytes(buffer[13:14])
+
+	# TODO This works for 3" drives, but not the Gotek 790K image
+	#
+	def getSize(self):
+		return ((self.diskSize + 1) << self.blockShift) * 128
+
 # Class to create a file object
 #
 class File:
@@ -24,10 +43,39 @@ class File:
 		self.readOnly = bool(buffer[9] & 0x80)
 		self.hidden = bool(buffer[10] & 0x80)
 		self.archived = bool(buffer[11] & 0x80)
-		self.size = buffer[15] * 128 				# TODO This is probably incorrect
+		self.size = buffer[15] * 128
 	
 	def __repr__(self):
 		return f"{self.drive}:{self.filename}.{self.extension} [{self.size}]"
+
+# Class to represent a directory
+#
+class Dir:
+	def __init__(self):
+		self.drive = None
+		self.driveConfig = None 
+		self.dpb = None 
+		self.entries = []
+		self.size = 0
+
+	def findFile(self, drive, filename, extension):
+		for file in self.entries:
+			if file.drive == drive and file.filename == filename and file.extension == extension:
+				return file
+		return None			
+
+	def append(self, drive, file):
+		self.size += file.size
+		f = self.findFile(drive, file.filename, file.extension)
+		if f == None:
+			self.entries.append(file)
+		else:
+			f.size += file.size 
+	
+	def total(self):
+		if(self.dpb != None):
+			return self.dpb.getSize()
+		return 0
 
 # Class to wrap the serial port
 #
@@ -131,24 +179,24 @@ class Transfer(Protocol):
 	
 	def getDPB(self):
 		self.sendCmd(0x42)
-		dpb = self.getBuffer(15)
-		return dpb
+		buffer = self.getBuffer(15)
+		return DPB(buffer)
 	
 	def getDIR(self, drive):
-		res = s.setDisc(drive)
+		dir = Dir()
+		res = self.setDisc(drive)
 		if res != 0:
-			return None
-		dir = []
-		dpb = self.getDPB()
-		entries = int.from_bytes(dpb[7:8]) + 1
-		track = int.from_bytes(dpb[13:14])
-		self.sendCmd(0x24, drive, track, entries >> 4)		
+			return dir
+		dir.drive = drive
+		dir.dpb = self.getDPB()
+		dir.driveConfig = s.getDriveConfig()
+		self.sendCmd(0x24, drive, dir.dpb.systemTracks, dir.dpb.directoryEntries >> 4)		
 		while True:
 			result = self.readByte()
 			if result == 0:
 				buffer = self.getBuffer(0x10)
 				if buffer[0] == 0:
-					dir.append(File(drive, buffer))
+					dir.append(drive, File(drive, buffer))
 			else:
 				break 
 		return dir
@@ -193,11 +241,18 @@ class Transfer(Protocol):
 s = Transfer(port)	# Open the serial port
 
 res = s.reset()		# Send a reset command to EinTrans
-dir = s.getDIR(0)	# Get the directory of drive 0
+dir = s.getDIR(1)	# Get the directory
 
 # Iterate through the directory and get the files from the Einstein
+# My drives should return
 #
-for file in dir:
-	s.getFile(file.drive, file.filename, file.extension)
+# 0: 168K Size, 620K Free, 790K Total
+# 1: 106K Size,  82K Free, 190K Total
+#
+# Total file sizes are also reporting low
+#
+for file in dir.entries:
+	print(f"{file.drive}:{file.filename}.{file.extension} = {file.size}")
+print(f"{dir.size//1024}K Size, {(dir.total() - dir.size)//1024}K Free, {dir.total()//1024}K Total")
 
 s.close()			# Close the serial port
