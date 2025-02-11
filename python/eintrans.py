@@ -10,6 +10,7 @@
 
 import serial
 import time
+import math
 
 port = '/dev/ttyWCH0'
 
@@ -26,9 +27,10 @@ class DPB:
 		self.allocMap = buffer[9] + (buffer[10] << 8)
 		self.checkVector = buffer[11] + (buffer[12] << 8)
 		self.systemTracks = buffer[13] + (buffer[14] << 8)
+		self.blockSize = 128 << self.blockShift
 
 	def getSize(self):
-		return ((self.diskSize + 1) << self.blockShift) * 128
+		return (self.diskSize + 1) * self.blockSize
 
 # Class to create a file object
 #
@@ -55,6 +57,7 @@ class Dir:
 		self.dpb = None 
 		self.entries = []
 		self.size = 0
+		self.used = 0
 
 	def findFile(self, drive, filename, extension):
 		for file in self.entries:
@@ -63,13 +66,15 @@ class Dir:
 		return None			
 
 	def append(self, drive, file):
+		blockSize = self.dpb.blockSize
 		self.size += file.size
+		self.used += math.ceil(file.size/blockSize)*blockSize
 		f = self.findFile(drive, file.filename, file.extension)
 		if f == None:
 			self.entries.append(file)
 		else:
 			f.size += file.size 
-	
+
 	def total(self):
 		if(self.dpb != None):
 			return self.dpb.getSize()
@@ -251,6 +256,8 @@ dir = s.getDIR(1)	# Get the directory
 #
 for file in dir.entries:
 	print(f"{file.drive}:{file.filename}.{file.extension} = {file.size}")
-print(f"{dir.size//1024}K Size, {(dir.total() - dir.size)//1024}K Free, {dir.total()//1024}K Total")
+used = dir.used // 1024
+total = dir.total() // 1024
+print(f"{used}K Size, {total - used}K Free, {total}K Total")
 
 s.close()			# Close the serial port
