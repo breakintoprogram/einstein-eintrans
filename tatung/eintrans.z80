@@ -3,1109 +3,1050 @@
 ; Author:	Ste Ruddy
 ; Modified By:	Dean Belfeld
 ; Modified:	18/01/2025
-; Last Updated:	05/02/2025
+; Last Updated:	11/02/2025
 ;
 ; NB:
 ; To assemble: sjasmplus eintrans.z80 --raw=EINTRANS.COM
 ;
 ; Modinfo:
+; 11/02/2025:	Reformatted the source
 
-	org	00100h
+		org	00100h
 
-ZRSECT:	equ	0xA2	; Read a single 512-byte sector from the disk
-ZWSECT:	equ	0xA3	; Write a single 512-byte sector to the disk
-ZFDRST:	equ	0xBD	; Reset and initialise the FDC and PSG, deselect any enabled drives.
-ZOUTC:	equ	0xCF	; Einstein MCAL command for print text
+ZRSECT:		equ	0xA2	; Read a single 512-byte sector from the disk
+ZWSECT:		equ	0xA3	; Write a single 512-byte sector to the disk
+ZFDRST:		equ	0xBD	; Reset and initialise the FDC and PSG, deselect any enabled drives.
+ZOUTC:		equ	0xCF	; Einstein MCAL command for print text
 
-FBUF:	equ	0x0080	; File buffer address
-FBUF_S:	equ	0x0080	; File buffer size
-SBUF:	equ	0x0b00	; Sector buffer address
+FBUF:		equ	0x0080	; File buffer address
+FBUF_S:		equ	0x0080	; File buffer size
+SBUF:		equ	0x0b00	; Sector buffer address
 
-PHYDSC:	equ	0xFB50	; Current physical drive number
-PHYTRK:	equ	0xFB51	; Current physical drive track number
-PHYSEC:	equ	0xFB52	; Current physical drive sector number
-PHYBUF:	equ	0xFB53	; Current physical disc buffer area
-STATUS:	equ	0xFB56	; Disc error status
-SIDFLG:	equ	0xFBB1	; Double-sided flag
+PHYDSC:		equ	0xFB50	; Current physical drive number
+PHYTRK:		equ	0xFB51	; Current physical drive track number
+PHYSEC:		equ	0xFB52	; Current physical drive sector number
+PHYBUF:		equ	0xFB53	; Current physical disc buffer area
+STATUS:		equ	0xFB56	; Disc error status
+SIDFLG:		equ	0xFBB1	; Double-sided flag
 
-CONIN:	equ	0xFA09	; Vector for CONIN
-DOS:	equ	0x0005	; Vector for DOS calls
+CONIN:		equ	0xFA09	; Vector for CONIN
+DOS:		equ	0x0005	; Vector for DOS calls
 
 ;
 ; Various ASCII codes
 ;
-FF:	equ	0x0C
-CR:	equ	0x0D
-LF:	equ	0x0A
-BEL:	equ	0x07
+FF:		equ	0x0C
+CR:		equ	0x0D
+LF:		equ	0x0A
+BEL:		equ	0x07
 
 ;
 ; Macros
 ;
-	MACRO	MCAL cmd
-	RST	0x08
-	DB	cmd
-	ENDM 
+		MACRO	MCAL cmd
+		RST	0x08
+		DB	cmd
+		ENDM 
 ;
 ; Program entry point
 ;
-start:	ld sp,	00affh		;0100	31 ff 0a
-
-	MCAL	ZOUTC
-	DB	FF
-	DB	"EINTRANS: Einstein[]PC Transfer V2.00",CR,LF
-	DB	"Copyright (c) 2002 Ste Ruddy.",CR,LF,CR,LF+0x80
+start:		ld sp,	00affh		;0100	31 ff 0a
+		MCAL	ZOUTC
+		DB	FF
+		DB	"EINTRANS: Einstein[]PC Transfer V2.00",CR,LF
+		DB	"Copyright (c) 2002 Ste Ruddy.",CR,LF,CR,LF+0x80
 ;
 ; Warm start
 ;
-warm:
-	ld sp,00affh		;014e	31 ff 0a 
-	call com_flush		;0151	cd 70 07 	Flush the serial port
-	call dos_setbuf		;0154	cd 68 07  	Initialise the file buffer
+warm:		ld sp,00affh		;014e	31 ff 0a 
+		call com_flush		;0151	cd 70 07 	Flush the serial port
+		call dos_setbuf		;0154	cd 68 07  	Initialise the file buffer
 ;
 ; Wait for input from the serial port
 ;
-wait:
-	MCAL	ZOUTC
-	DB	CR
-	DB	"Waiting...            "," "+0x80
+wait:		MCAL	ZOUTC
+		DB	CR
+		DB	"Waiting...            "," "+0x80
 ;
 ; This loop seems to be waiting for a command sequence as follows:
 ; Byte 1: 0x2A
 ; Byte 2: 0x21
 ; Byte 3: A command byte - see cmdtab for the full list
 ;
-wait1:
-	call reads		;0171	cd f3 07	Read a byte from the serial port
-	cp 02ah			;0174	fe 2a		Is it 0x2A?
-	jr z,wait1		;0176	28 f9		Yes, so loop back to read the second byte
-	cp 021h			;0178	fe 21		Is it 0x21?
-	jr nz,waite		;017a	20 1a		No, so jump to unknown command
+wait1:		call reads		;0171	cd f3 07	Read a byte from the serial port
+		cp 02ah			;0174	fe 2a		Is it 0x2A?
+		jr z,wait1		;0176	28 f9		Yes, so loop back to read the second byte
+		cp 021h			;0178	fe 21		Is it 0x21?
+		jr nz,waite		;017a	20 1a		No, so jump to unknown command
 ;
-	call com_readst		;017c	cd 8d 07	Read the third byte in, with a timeout
-	ld hl,cmdtab-2		;017f	21 b0 01	Index into the cmdtab (-2 as we inc hl twice first)
-	ld de,jpcmd+1		;0182	11 94 01 	Index to self-mod the jpcmd
+		call com_readst		;017c	cd 8d 07	Read the third byte in, with a timeout
+		ld hl,cmdtab-2		;017f	21 b0 01	Index into the cmdtab (-2 as we inc hl twice first)
+		ld de,jpcmd+1		;0182	11 94 01 	Index to self-mod the jpcmd
 ;
 ; Now we have a command byte, look it up in cmdtab
 ;
-wait2:
-	inc hl			;0185	23		Skip past the address
-	inc hl			;0186	23 
-	bit 7,(hl)		;0187	cb 7e 		Is bit 7 set (test for the 0xFF end marker)?
-	jr nz,waite		;0189	20 0b 		Yes, so jump to unknown command
-	cp (hl)			;018b	be 		Compare with the provided command code
-	inc hl			;018c	23 		Skip to the address byte
-	jr nz,wait2		;018d	20 f6 	  	If there is no match then loop
+wait2:		inc hl			;0185	23		Skip past the address
+		inc hl			;0186	23 
+		bit 7,(hl)		;0187	cb 7e 		Is bit 7 set (test for the 0xFF end marker)?
+		jr nz,waite		;0189	20 0b 		Yes, so jump to unknown command
+		cp (hl)			;018b	be 		Compare with the provided command code
+		inc hl			;018c	23 		Skip to the address byte
+		jr nz,wait2		;018d	20 f6 	  	If there is no match then loop
 ;
-	ldi			;018f	ed a0 		There is a match, so copy the address from the
-	ldi			;0191	ed a0 		table into the address operand of the following jp
-jpcmd:	jp 00000h		;0193	c3 00 00 	And then jump to it
+		ldi			;018f	ed a0 		There is a match, so copy the address from the
+		ldi			;0191	ed a0 		table into the address operand of the following jp
+jpcmd:		jp 00000h		;0193	c3 00 00 	And then jump to it
 
 ; Unknown command error
 ;
-waite:
-	MCAL	ZOUTC		; 			This is the MOS command to output a string
-	DB	BEL,CR 
-	DB	" * Unknown command ?",LF,CR+0x80
-	jr 	wait		;01b0	18 a5		Once we've done, loop back to wait for the next command
+waite:		MCAL	ZOUTC		; 			This is the MOS command to output a string
+		DB	BEL,CR 
+		DB	" * Unknown command ?",LF,CR+0x80
+		jr 	wait		;01b0	18 a5		Once we've done, loop back to wait for the next command
 ;
 ; This looks like a command lookup table
 ; Byte: The command code
 ; Word: The address to jump to
 ;
-cmdtab:
-	DB 0x25: DW cmd_reset		; Warm reset
-	DB 0x52: DW cmd_putfile		; Send file to the PC
-	DB 0x57: DW cmd_getfile		; Get file from the PC
-	DB 0x3D: DW cmd_renfile		; Rename file
-	DB 0x2E: DW cmd_delfile		; Delete file
-	DB 0x72: DW cmd_putdisk		; Write disk image to the PC
-	DB 0x77: DW cmd_getdisk		; Get disk image from the PC
-	DB 0x44: DW cmd_getdrvcfg	; Get the drive config
-	DB 0x24: DW cmd_getdir		; Get the directory entries
-	DB 0x42: DW cmd_getdpb		; Get the disk parameter block
-	DB 0x53: DW cmd_setdisc		; Set the current disk number
-	DB 0x45: DW cmd_exec		; Execute
-	DB 0x58: DW 0x0000		; Cold reset
-	DB 0xFF
+cmdtab:		DB 0x25: DW cmd_reset		; Warm reset
+		DB 0x52: DW cmd_putfile		; Send file to the PC
+		DB 0x57: DW cmd_getfile		; Get file from the PC
+		DB 0x3D: DW cmd_renfile		; Rename file
+		DB 0x2E: DW cmd_delfile		; Delete file
+		DB 0x72: DW cmd_putdisk		; Write disk image to the PC
+		DB 0x77: DW cmd_getdisk		; Get disk image from the PC
+		DB 0x44: DW cmd_getdrvcfg	; Get the drive config
+		DB 0x24: DW cmd_getdir		; Get the directory entries
+		DB 0x42: DW cmd_getdpb		; Get the disk parameter block
+		DB 0x53: DW cmd_setdisc		; Set the current disk number
+		DB 0x45: DW cmd_exec		; Execute
+		DB 0x58: DW 0x0000		; Cold reset
+		DB 0xFF
 ;
 ; This seems to be a DOS call wrapper
 ;  C: The DOS function to call
 ;
-doscall:
-	call doscall_1		;01da	cd e0 01 
-	call DOS		;01dd	cd 05 00 
+doscall:	call doscall1		;01da	cd e0 01 
+		call DOS		;01dd	cd 05 00 
 ;
 ; This function swaps CONIN and the value of doscall_t
 ;
-doscall_1:
-	push hl			;01e0	e5  
-	ld hl,(doscall_t)	;01e1	2a f1 01	Get the current value stored in doscall_t
-	push hl			;01e4	e5 		Stack it
-	ld hl,(CONIN+1)		;01e5	2a 0a fa	Get the current value stored in the CONIN vector
-	ld (doscall_t),hl	;01e8	22 f1 01 	Store in doscall_t
-	pop hl			;01eb	e1 		Pop the previous value of doscall_t
-	ld (CONIN+1),hl		;01ec	22 0a fa 	Store in the CONIN vector
-	pop hl			;01ef	e1 
-	ret			;01f0	c9 
-doscall_t:
-	DW	doscall_2
-doscall_2:
-	ld a,(STATUS)		;01f3	3a 56 fb	This is the actual DOS call
-	add a,080h		;01f6	c6 80 	
-	call com_writest	;01f8	cd ae 07 
-	MCAL ZFDRST		
-	call doscall_1		;01fd	cd e0 01 
-	jp warm			;0200	c3 4e 01 
+doscall1:	push hl			;01e0	e5  
+		ld hl,(var_doscall)	;01e1	2a f1 01	Get the current value stored in var_doscall
+		push hl			;01e4	e5 		Stack it
+		ld hl,(CONIN+1)		;01e5	2a 0a fa	Get the current value stored in the CONIN vector
+		ld (var_doscall),hl	;01e8	22 f1 01 	Store in var_doscall
+		pop hl			;01eb	e1 		Pop the previous value of var_doscall
+		ld (CONIN+1),hl		;01ec	22 0a fa 	Store in the CONIN vector
+		pop hl			;01ef	e1 
+		ret			;01f0	c9 
+
+var_doscall:	DW	doscall2
+
+doscall2:	ld a,(STATUS)		;01f3	3a 56 fb	This is the actual DOS call
+		add a,080h		;01f6	c6 80 	
+		call com_writest	;01f8	cd ae 07 
+		MCAL ZFDRST		
+		call doscall1		;01fd	cd e0 01 
+		jp warm			;0200	c3 4e 01 
 
 ; Command: Send a file to the PC
 ;
-cmd_putfile:	
-	call com_getfilename	;0203	cd 5c 06 	Get the filename from the PC	
-	call dispfile		;0206	cd 85 08 	Display it
-	call dos_openfile	;0209	cd 06 07 	Open the file
-	jr nz,1F		;020c	20 15 	  	No errors, then skip to transfer
-	ld a,001h		;020e	3e 01 		Otherwise return the error code 1
-	call com_writest	;0210	cd ae 07 	back to the PC
-	MCAL	ZOUTC		;			And display an error message
-	DB	"Not found",LF,CR+0x80
-	jp wait			;0220	c3 57 01 	Jump back to the main loop
+cmd_putfile:	call com_filename	;0203	cd 5c 06 	Get the filename from the PC	
+		call dispfile		;0206	cd 85 08 	Display it
+		call dos_openfile	;0209	cd 06 07 	Open the file
+		jr nz,1F		;020c	20 15 	  	No errors, then skip to transfer
+		ld a,001h		;020e	3e 01 		Otherwise return the error code 1
+		call com_writest	;0210	cd ae 07 	back to the PC
+		MCAL	ZOUTC		;			And display an error message
+		DB	"Not found",LF,CR+0x80
+		jp wait			;0220	c3 57 01 	Jump back to the main loop
 ;
-1:	ld a,000h		;0223	3e 00 		Return success code back to PC
-	call com_writest	;0225	cd ae 07 
-	MCAL	ZOUTC		;			Display sending...
-	DB	"Sendin","g"+0x80
+1:		ld a,000h		;0223	3e 00 		Return success code back to PC
+		call com_writest	;0225	cd ae 07 
+		MCAL	ZOUTC		;			Display sending...
+		DB	"Sendin","g"+0x80
 ;
-2:	call dos_readfile	;0231	cd 13 07 	Read the file in
-	jr nz,3F		;0234	20 10 	 	Skip to next bit if EOF	
-	ld a,000h		;0236	3e 00 		Return code 0 back to the PC
-	call com_writest	;0238	cd ae 07 	
-	ld hl,FBUF		;023b	21 80 00 	Where to store the block	
-	ld bc,FBUF_S		;023e	01 80 00 	Number of bytes to read out
-	call com_writebuf	;0241	cd 7f 06 	Write it out to the PC
-	jr 2B			;0244	18 eb 	 	Loop until finished
+2:		call dos_readfile	;0231	cd 13 07 	Read the file in
+		jr nz,3F		;0234	20 10 	 	Skip to next bit if EOF	
+		ld a,000h		;0236	3e 00 		Return code 0 back to the PC
+		call com_writest	;0238	cd ae 07 	
+		ld hl,FBUF		;023b	21 80 00 	Where to store the block	
+		ld bc,FBUF_S		;023e	01 80 00 	Number of bytes to read out
+		call com_writebuf	;0241	cd 7f 06 	Write it out to the PC
+		jr 2B			;0244	18 eb 	 	Loop until finished
 ;
-3:	ld a,002h		;0246	3e 02 		Return code 2 back to the PC indicating success
-	call com_writest	;0248	cd ae 07 	 
-	call dispfile		;024b	cd 85 08 	Display the file 
-	MCAL	ZOUTC		;			Display a success message
-	DB	"Sent   ",CR," +",CR,LF+0x80
-	call dos_closefile	;025c	cd 27 07 	Close the file
-	jp wait			;025f	c3 57 01 	Jump back to the main loop
+3:		ld a,002h		;0246	3e 02 		Return code 2 back to the PC indicating success
+		call com_writest	;0248	cd ae 07 	 
+		call dispfile		;024b	cd 85 08 	Display the file 
+		MCAL	ZOUTC		;			Display a success message
+		DB	"Sent   ",CR," +",CR,LF+0x80
+		call dos_closefile	;025c	cd 27 07 	Close the file
+		jp wait			;025f	c3 57 01 	Jump back to the main loop
 
 ; Command: Get a file from the PC
 ;
-cmd_getfile:
-	call com_getfilename	;0262	cd 5c 06 	Get the filename from the PC	
-	call dispfile		;0265	cd 85 08 	Display it
-	call dos_erasefile	;0268	cd 3a 07 	Erase the file
-	call dos_createfile	;026b	cd 4e 07 	Create a new file
-	jr nz,2F		;026e	20 1a 	   	If there is no error then skip to next bit
+cmd_getfile:	call com_filename	;0262	cd 5c 06 	Get the filename from the PC	
+		call dispfile		;0265	cd 85 08 	Display it
+		call dos_erasefile	;0268	cd 3a 07 	Erase the file
+		call dos_createfile	;026b	cd 4e 07 	Create a new file
+		jr nz,2F		;026e	20 1a 	   	If there is no error then skip to next bit
 ;
-1:	call dispfile		;0270	cd 85 08 	Display the filename	 
-	ld a,001h		;0273	3e 01  		Send 1 back to the PC
-	call com_writest	;0275	cd ae 07
-	MCAL	ZOUTC		;			Display the error message
-	DB	"Write error",LF,CR+0x80
-	jp wait			;0287	c3 57 01 	Jump back to the main loop 
+1:		call dispfile		;0270	cd 85 08 	Display the filename	 
+		ld a,001h		;0273	3e 01  		Send 1 back to the PC
+		call com_writest	;0275	cd ae 07
+		MCAL	ZOUTC		;			Display the error message
+		DB	"Write error",LF,CR+0x80
+		jp wait			;0287	c3 57 01 	Jump back to the main loop 
 ;
-2:	ld a,000h		;028a	3e 00 		Send 0 back to the PC
-	call com_writest	;028c	cd ae 07 	 
-	MCAL	ZOUTC		;			Display success message
-	DB	"Receivin","g"+0x80
+2:		ld a,000h		;028a	3e 00 		Send 0 back to the PC
+		call com_writest	;028c	cd ae 07 	 
+		MCAL	ZOUTC		;			Display success message
+		DB	"Receivin","g"+0x80
 ;
-3:	ld hl,FBUF		;029a	21 80 00 	Pointer to the file buffer
-	ld bc,FBUF_S		;029d	01 80 00 	Size of file buffer
-	call com_readbuf	;02a0	cd c6 06 	Read the file from the PC
-	call dos_writefile	;02a3	cd 1d 07 	Write it out to the file
-	or a			;02a6	b7 	 	If there has been a write error (disk full)
-	jr nz,1B		;02a7	20 c7 	 	Then exit the loop with error
+3:		ld hl,FBUF		;029a	21 80 00 	Pointer to the file buffer
+		ld bc,FBUF_S		;029d	01 80 00 	Size of file buffer
+		call com_readbuf	;02a0	cd c6 06 	Read the file from the PC
+		call dos_writefile	;02a3	cd 1d 07 	Write it out to the file
+		or a			;02a6	b7 	 	If there has been a write error (disk full)
+		jr nz,1B		;02a7	20 c7 	 	Then exit the loop with error
 ;
-	ld a,000h		;02a9	3e 00 	 	Send 0 back to the PC
-	call com_writest	;02ab	cd ae 07 	 
-	call com_readst		;02ae	cd 8d 07 	Get the return code
-	cp 002h			;02b1	fe 02 	 	If it is not 2 then
-	jr nz,3B		;02b3	20 e5 	 	Loop round for the next block
+		ld a,000h		;02a9	3e 00 	 	Send 0 back to the PC
+		call com_writest	;02ab	cd ae 07 	 
+		call com_readst		;02ae	cd 8d 07 	Get the return code
+		cp 002h			;02b1	fe 02 	 	If it is not 2 then
+		jr nz,3B		;02b3	20 e5 	 	Loop round for the next block
 ;
-	call dispfile		;02b5	cd 85 08 	Display the file
-	MCAL	ZOUTC		;			And the success message
-	DB	"Received ",CR," +",LF+0x80
-	call dos_closefile	;02c7	cd 27 07 	Close the file
-	jp wait			;02ca	c3 57 01 	Jump back to the main loop
+		call dispfile		;02b5	cd 85 08 	Display the file
+		MCAL	ZOUTC		;			And the success message
+		DB	"Received ",CR," +",LF+0x80
+		call dos_closefile	;02c7	cd 27 07 	Close the file
+		jp wait			;02ca	c3 57 01 	Jump back to the main loop
 
 ; Command: Write a disk image to the PC
 ;
-cmd_putdisk:
-	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
-	ld (PHYDSC),a		;02d0	32 50 fb
-	call com_readst		;02d3	cd 8d 07	
-	ld (var_08deh),a	;02d6	32 de 08
-	call com_readst		;02d9	cd 8d 07
-	ld (var_numsectors),a	;02dc	32 df 08
-	call com_readst		;02df	cd 8d 07
-	ld (var_08e0h),a	;02e2	32 e0 08
-	ld hl,SBUF		;02e5	21 00 0b
-	ld bc,00000h		;02e8	01 00 00
-	ld a,(PHYDSC)		;02eb	3a 50 fb	Select the physical disk
-	call setdisk		;02ee	cd 02 08
-	xor a			;02f1	af 		Read prefix
-	call dispdiskop		;02f2	cd 0d 08 	Display the disk operation
+cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
+		ld (PHYDSC),a		;02d0	32 50 fb
+		call com_readst		;02d3	cd 8d 07	
+		ld (var_08deh),a	;02d6	32 de 08
+		call com_readst		;02d9	cd 8d 07
+		ld (var_numsectors),a	;02dc	32 df 08
+		call com_readst		;02df	cd 8d 07
+		ld (var_08e0h),a	;02e2	32 e0 08
+		ld hl,SBUF		;02e5	21 00 0b
+		ld bc,00000h		;02e8	01 00 00
+		ld a,(PHYDSC)		;02eb	3a 50 fb	Select the physical disk
+		call setdisk		;02ee	cd 02 08
+		xor a			;02f1	af 		Read prefix
+		call dispdiskop		;02f2	cd 0d 08 	Display the disk operation
 ;
-1:	call com_readst		;02f5	cd 8d 07 	Read a byte in from the PC
-	cp 002h			;02f8	fe 02 	 
-	jr z,6F			;02fa	28 44 		If it is 2 then exit the loop, finished
-	ld hl,SBUF		;02fc	21 00 0b 	Set the disk buffer area 
-	ld (PHYBUF),hl		;02ff	22 53 fb 
-	ld hl,var_08e1h		;0302	21 e1 08
-	ld a,(var_08e0h)	;0305	3a e0 08 
-	ld b,a			;0308	47 	
+1:		call com_readst		;02f5	cd 8d 07 	Read a byte in from the PC
+		cp 002h			;02f8	fe 02 	 
+		jr z,6F			;02fa	28 44 		If it is 2 then exit the loop, finished
+		ld hl,SBUF		;02fc	21 00 0b 	Set the disk buffer area 
+		ld (PHYBUF),hl		;02ff	22 53 fb 
+		ld hl,var_08e1h		;0302	21 e1 08
+		ld a,(var_08e0h)	;0305	3a e0 08 
+		ld b,a			;0308	47 	
 ;
-2:	xor a			;0309	af 		Read prefix
-	call dispdiskop		;030a	cd 0d 08 	Display the disk operation
+2:		xor a			;0309	af 		Read prefix
+		call dispdiskop		;030a	cd 0d 08 	Display the disk operation
 ;
-3:	push bc			;030d	c5 	
-	push hl			;030e	e5 	 
-	xor a			;030f	af 	 
-	ld (STATUS),a		;0310	32 56 fb 	Clear the status byte
-	MCAL ZRSECT		;			Read a single 512-byte sector in
-	call mos_nextsector	;0315	cd 02 04 	Skip to the next sector 
-	pop hl			;0318	e1 	
-	pop bc			;0319	c1 	 
-	ld (hl),a		;031a	77 	 
-	inc hl			;031b	23 	 
-	dec b			;031c	05 	 
-	jr z,4F			;031d	28 0b 	 
-	or a			;031f	b7 	 
-	jr nz,2B		;0320	20 e7 	   
-	ld a,(PHYSEC)		;0322	3a 52 fb  
-	or a			;0325	b7 	 
-	jr nz,3B		;0326	20 e5 	 
-	jr 2B			;0328	18 df 	 
-4:
-	call sub_0676h		;032a	cd 76 06 
-	ld hl,SBUF		;032d	21 00 0b 
-	ld a,(var_08e0h)	;0330	3a e0 08
-	ld b,a			;0333	47
-5:
-	push bc			;0334	c5 	
-	ld bc,0200h		;0335	01 00 02 	 
-	call com_writebuf	;0338	cd 7f 06 
-	pop bc			;033b	c1 
-	djnz 5B			;033c	10 f6 	 
-	jr 1B			;033e	18 b5 	 
+3:		push bc			;030d	c5 	
+		push hl			;030e	e5 	 
+		xor a			;030f	af 	 
+		ld (STATUS),a		;0310	32 56 fb 	Clear the status byte
+		MCAL ZRSECT		;			Read a single 512-byte sector in
+		call mos_nextsector	;0315	cd 02 04 	Skip to the next sector 
+		pop hl			;0318	e1 	
+		pop bc			;0319	c1 	 
+		ld (hl),a		;031a	77 	 
+		inc hl			;031b	23 	 
+		dec b			;031c	05 	 
+		jr z,4F			;031d	28 0b 	 
+		or a			;031f	b7 	 
+		jr nz,2B		;0320	20 e7 	   
+		ld a,(PHYSEC)		;0322	3a 52 fb  
+		or a			;0325	b7 	 
+		jr nz,3B		;0326	20 e5 	 
+		jr 2B			;0328	18 df 	 
+
+4:		call sub_0676h		;032a	cd 76 06 
+		ld hl,SBUF		;032d	21 00 0b 
+		ld a,(var_08e0h)	;0330	3a e0 08
+		ld b,a			;0333	47
+5:		push bc			;0334	c5 	
+		ld bc,0200h		;0335	01 00 02 	 
+		call com_writebuf	;0338	cd 7f 06 
+		pop bc			;033b	c1 
+		djnz 5B			;033c	10 f6 	 
+		jr 1B			;033e	18 b5 	 
 ;
-6:	MCAL	ZOUTC		;			Display the success message
-	DB	CR
-	DB	" + DISC read and sent         ",LF,CR+0x80
-	jp wait			;0363	c3 57 01 	Jump back to the main loop
+6:		MCAL	ZOUTC		;			Display the success message
+		DB	CR
+		DB	" + DISC read and sent         ",LF,CR+0x80
+		jp wait			;0363	c3 57 01 	Jump back to the main loop
 
 ; Command: Get a disk image from the PC
 ;
-cmd_getdisk:
-	call com_readst		;0366	cd 8d 07
-	ld (PHYDSC),a		;0369	32 50 fb
-	call com_readst		;036c	cd 8d 07
-	ld (var_08deh),a	;036f	32 de 08
-	call com_readst		;0372	cd 8d 07
-	ld (var_numsectors),a	;0375	32 df 08	; Number of sectors
-	call com_readst		;0378	cd 8d 07
-	ld (var_08e0h),a	;037b	32 e0 08
-	ld hl,SBUF		;037e	21 00 0b
-	ld bc,00000h		;0381	01 00 00
-	ld a,(PHYDSC)		;0384	3a 50 fb
-	call setdisk		;0387	cd 02 08
-	ld a,001h		;038a	3e 01 	
-	call dispdiskop		;038c	cd 0d 08 	 
-1:
-	call com_readst		;038f	cd 8d 07 	 
-	cp 002h			;0392	fe 02 	 
-	jr z,6F			;0394	28 45 	
-	ld hl,SBUF		;0396	21 00 0b 	  
-	ld a,(var_08e0h)	;0399	3a e0 08 	  
-	ld b,a			;039c	47 
-2:
-	push bc			;039d	c5 	
-	ld bc,0200h		;039e	01 00 02 	 
-	call com_readbuf	;03a1	cd c6 06 	 
-	pop bc			;03a4	c1 	
-	djnz 2B			;03a5	10 f6 	 
-	ld hl,SBUF		;03a7	21 00 0b 	 
-	ld (PHYBUF),hl		;03aa	22 53 fb 
-	ld a,(var_08e0h)	;03ad	3a e0 08   
-	ld b,a			;03b0	47 	 
-	ld hl,var_08e1h		;03b1	21 e1 08  
-3:
-	ld a,001h		;03b4	3e 01 
-	call dispdiskop		;03b6	cd 0d 08 	 
-4:
-	push hl			;03b9	e5
-	push bc			;03ba	c5
-	xor a			;03bb	af
-	ld (STATUS),a		;03bc	32 56 fb 	
-	MCAL ZWSECT		;			Write a single 512-byte sector out
-	call mos_nextsector	;03c1	cd 02 04 	Skip to the next sector 
-	pop bc			;03c4	c1 
-	pop hl			;03c5	e1 
-	ld (hl),a		;03c6	77 
-	inc hl			;03c7	23 
-	dec b			;03c8	05 
-	jr z,5F			;03c9	28 0b 	
-	or a			;03cb	b7 	
-	jr nz,3B		;03cc	20 e6 	  
-	ld a,(PHYSEC)		;03ce	3a 52 fb 	
-	or a			;03d1	b7 	
-	jr nz,4B		;03d2	20 e5 	 
-	jr 3B			;03d4	18 de 	 
-5:
-	call sub_0676h		;03d6	cd 76 06 
-	jr 1B			;03d9	18 b4 	 
-6:
-	MCAL	ZOUTC
-	DB	CR
-	DB	" + DISC received and written   ",LF,CR+0x80
-	jp wait			;03ff	c3 57 01 
+cmd_getdisk:	call com_readst		;0366	cd 8d 07
+		ld (PHYDSC),a		;0369	32 50 fb
+		call com_readst		;036c	cd 8d 07
+		ld (var_08deh),a	;036f	32 de 08
+		call com_readst		;0372	cd 8d 07
+		ld (var_numsectors),a	;0375	32 df 08	; Number of sectors
+		call com_readst		;0378	cd 8d 07
+		ld (var_08e0h),a	;037b	32 e0 08
+		ld hl,SBUF		;037e	21 00 0b
+		ld bc,00000h		;0381	01 00 00
+		ld a,(PHYDSC)		;0384	3a 50 fb
+		call setdisk		;0387	cd 02 08
+		ld a,001h		;038a	3e 01 	
+		call dispdiskop		;038c	cd 0d 08 	 
+;
+1:		call com_readst		;038f	cd 8d 07 	 
+		cp 002h			;0392	fe 02 	 
+		jr z,6F			;0394	28 45 	
+		ld hl,SBUF		;0396	21 00 0b 	  
+		ld a,(var_08e0h)	;0399	3a e0 08 	  
+		ld b,a			;039c	47 
+2:		push bc			;039d	c5 	
+		ld bc,0200h		;039e	01 00 02 	 
+		call com_readbuf	;03a1	cd c6 06 	 
+		pop bc			;03a4	c1 	
+		djnz 2B			;03a5	10 f6 	 
+		ld hl,SBUF		;03a7	21 00 0b 	 
+		ld (PHYBUF),hl		;03aa	22 53 fb 
+		ld a,(var_08e0h)	;03ad	3a e0 08   
+		ld b,a			;03b0	47 	 
+		ld hl,var_08e1h		;03b1	21 e1 08  
+3:		ld a,001h		;03b4	3e 01 
+		call dispdiskop		;03b6	cd 0d 08 	 
+4:		push hl			;03b9	e5
+		push bc			;03ba	c5
+		xor a			;03bb	af
+		ld (STATUS),a		;03bc	32 56 fb 	
+		MCAL ZWSECT		;			Write a single 512-byte sector out
+		call mos_nextsector	;03c1	cd 02 04 	Skip to the next sector 
+		pop bc			;03c4	c1 
+		pop hl			;03c5	e1 
+		ld (hl),a		;03c6	77 
+		inc hl			;03c7	23 
+		dec b			;03c8	05 
+		jr z,5F			;03c9	28 0b 	
+		or a			;03cb	b7 	
+		jr nz,3B		;03cc	20 e6 	  
+		ld a,(PHYSEC)		;03ce	3a 52 fb 	
+		or a			;03d1	b7 	
+		jr nz,4B		;03d2	20 e5 	 
+		jr 3B			;03d4	18 de 	 
+;
+5:		call sub_0676h		;03d6	cd 76 06 
+		jr 1B			;03d9	18 b4 	 
+
+6:		MCAL	ZOUTC
+		DB	CR
+		DB	" + DISC received and written   ",LF,CR+0x80
+		jp wait			;03ff	c3 57 01 
 
 ; Move the drive onto the next sector, track
 ;
-mos_nextsector:
-	ld a,(var_numsectors)	;0402	3a df 08 	Get number of sectors
-	ld hl,(PHYTRK)		;0405	2a 51 fb 	Get current sector (H) and track (L)
-	inc h			;0408	24 		Increment sector
-	cp h			;0409	bc 	 	If it is equal to last sector on drive then
-	jr nz,1F		;040a	20 03 	   
-	ld h,000h		;040c	26 00 	 	Zero the sector
-	inc l			;040e	2c 	 	Increment the track
-1:	ld (PHYTRK),hl		;040f	22 51 fb 	Store it back in the scratchpad
+mos_nextsector:	ld a,(var_numsectors)	;0402	3a df 08 	Get number of sectors
+		ld hl,(PHYTRK)		;0405	2a 51 fb 	Get current sector (H) and track (L)
+		inc h			;0408	24 		Increment sector
+		cp h			;0409	bc 	 	If it is equal to last sector on drive then
+		jr nz,1F		;040a	20 03 	   
+		ld h,000h		;040c	26 00 	 	Zero the sector
+		inc l			;040e	2c 	 	Increment the track
+1:		ld (PHYTRK),hl		;040f	22 51 fb 	Store it back in the scratchpad
 ;
-	ld a,(PHYBUF+1)		;0412	3a 54 fb 	Get the buffer high byte
-	inc a			;0415	3c 		Increment 2 pages (512 bytes)
-	inc a			;0416	3c 	 
-	ld (PHYBUF+1),a		;0417	32 54 fb 	Store back in
-	ld a,(STATUS)		;041a	3a 56 fb 	Get the status
-	or a			;041d	b7 
-	ret z			;041e	c8 		Return if there are no issues
-	push af			;041f	f5 		Otherwise
-	MCAL ZFDRST		;			Reset and initialise the FDC and PSG, deselect any enabled drives
-	pop af			;0422	f1 
-	ret			;0423	c9 
+		ld a,(PHYBUF+1)		;0412	3a 54 fb 	Get the buffer high byte
+		inc a			;0415	3c 		Increment 2 pages (512 bytes)
+		inc a			;0416	3c 	 
+		ld (PHYBUF+1),a		;0417	32 54 fb 	Store back in
+		ld a,(STATUS)		;041a	3a 56 fb 	Get the status
+		or a			;041d	b7 
+		ret z			;041e	c8 		Return if there are no issues
+		push af			;041f	f5 		Otherwise
+		MCAL ZFDRST		;			Reset and initialise the FDC and PSG, deselect any enabled drives
+		pop af			;0422	f1 
+		ret			;0423	c9 
 
 ; Command: DIR
 ;
-cmd_getdir:
-	call com_readst		;0424	cd 8d 07 	Read in the drive number 
-	push af			;0427	f5 		Stack it
-	add a,030h		;0428	c6 30 		Self-mod the message
-	ld (cmd_getdir1),a	;042a	32 45 04 
-	MCAL	ZOUTC		;			It seems to be incorrectly output as track number
-	DB	CR 
-	DB	" - Reading DIR track "
-cmd_getdir1:
-	DB 	"?",":"+0x80
-	call com_readst		;0447	cd 8d 07 	Read track number from the PC
-	ld c,a			;044a	4f
-	call com_readst		;044b	cd 8d 07 	Read number of sectors to fetch from the PC
-	ld d,000h		;044e	16 00 	 
-	ld e,a			;0450	5f 		DE: Number of sectors
-	pop af			;0451	f1		 A: Drive number
-	ld hl,SBUF		;0452	21 00 0b 	HL: Disk buffer area
-	ld b,000h		;0455	06 00 	 	BC: Track number (C read from PC)
-	call setdisk		;0457	cd 02 08 	Set up the OS
-	ld b,e			;045a	43		 B: The loop counter (number of sectors to read)
-	push de			;045b	d5 		Stack number of sectors
+cmd_getdir:	call com_readst		;0424	cd 8d 07 	Read in the drive number 
+		push af			;0427	f5 		Stack it
+		add a,030h		;0428	c6 30 		Self-mod the message
+		ld (cmd_getdir1),a	;042a	32 45 04 
+		MCAL	ZOUTC		;			It seems to be incorrectly output as track number
+		DB	CR 
+		DB	" - Reading DIR track "
+cmd_getdir1:	DB 	"?",":"+0x80
+		call com_readst		;0447	cd 8d 07 	Read track number from the PC
+		ld c,a			;044a	4f
+		call com_readst		;044b	cd 8d 07 	Read number of sectors to fetch from the PC
+		ld d,000h		;044e	16 00 	 
+		ld e,a			;0450	5f 		DE: Number of sectors
+		pop af			;0451	f1		 A: Drive number
+		ld hl,SBUF		;0452	21 00 0b 	HL: Disk buffer area
+		ld b,000h		;0455	06 00 	 	BC: Track number (C read from PC)
+		call setdisk		;0457	cd 02 08 	Set up the OS
+		ld b,e			;045a	43		 B: The loop counter (number of sectors to read)
+		push de			;045b	d5 		Stack number of sectors
 ;
-1:	push bc			;045c	c5 		Stack loop counter
-	xor a			;045d	af  
-	ld (STATUS),a		;045e	32 56 fb 	Clear the status flag
-	MCAL ZRSECT		;			Read in a 512 byte sector
-	ld a,(PHYSEC)		;0463	3a 52 fb 	Increment the sector
-	inc a			;0466	3c 	
-	ld (PHYSEC),a		;0467	32 52 fb 	
-	ld a,(STATUS)		;046a	3a 56 fb 	Check the status
-	or a			;046d	b7 	
-	jr z,cmd_getdir2	;046e	28 10 		If there are no errors, then branch here
+1:		push bc			;045c	c5 		Stack loop counter
+		xor a			;045d	af  
+		ld (STATUS),a		;045e	32 56 fb 	Clear the status flag
+		MCAL ZRSECT		;			Read in a 512 byte sector
+		ld a,(PHYSEC)		;0463	3a 52 fb 	Increment the sector
+		inc a			;0466	3c 	
+		ld (PHYSEC),a		;0467	32 52 fb 	
+		ld a,(STATUS)		;046a	3a 56 fb 	Check the status
+		or a			;046d	b7 	
+		jr z,cmd_getdir2	;046e	28 10 		If there are no errors, then branch here
 ;	
-	MCAL ZFDRST		;			Otherwise reset the FDC
-	ld hl,(PHYBUF)		;0472	2a 53 fb	Clear out the buffer 
-	push hl			;0475	e5 	
-	pop de			;0476	d1 	
-	inc de			;0477	13 	
-	ld bc,001ffh		;0478	01 ff 01 
-	ld a,0e5h		;047b	3e e5 		Fill with 0e5h (erased file entry marker)	
-	ld (hl),a		;047d	77 	
-	ldir			;047e	ed b0 	 
+		MCAL ZFDRST		;			Otherwise reset the FDC
+		ld hl,(PHYBUF)		;0472	2a 53 fb	Clear out the buffer 
+		push hl			;0475	e5 	
+		pop de			;0476	d1 	
+		inc de			;0477	13 	
+		ld bc,001ffh		;0478	01 ff 01 
+		ld a,0e5h		;047b	3e e5 		Fill with 0e5h (erased file entry marker)	
+		ld (hl),a		;047d	77 	
+		ldir			;047e	ed b0 	 
 ;
-cmd_getdir2:
-	ld a,(PHYBUF+1)		;0480	3a 54 fb 	Get the high byte of the buffer
-	inc a			;0483	3c 	 	Increment by 512
-	inc a			;0484	3c 	
-	ld (PHYBUF+1),a		;0485	32 54 fb 
-	pop bc			;0488	c1 	 	Pop the loop counter
-	djnz 1B			;0489	10 d1 	 	Loop
-;				;			Print the success message
-	MCAL	ZOUTC 
-	DB	CR 
-	DB	" - Sending DIR entries"," "+0x80
+cmd_getdir2:	ld a,(PHYBUF+1)		;0480	3a 54 fb 	Get the high byte of the buffer
+		inc a			;0483	3c 	 	Increment by 512
+		inc a			;0484	3c 	
+		ld (PHYBUF+1),a		;0485	32 54 fb 
+		pop bc			;0488	c1 	 	Pop the loop counter
+		djnz 1B			;0489	10 d1 	 	Loop
+					
+		MCAL	ZOUTC 		;			Print the success message
+		DB	CR 
+		DB	" - Sending DIR entries"," "+0x80
 ;	
-	pop hl			;04a5	e1 		Pop the number of sectors
-	add hl,hl		;04a6	29 		Multiply by 16
-	add hl,hl		;04a7	29
-	add hl,hl		;04a8	29 
-	add hl,hl		;04a9	29 
-	push hl			;04aa	e5 
-	pop de			;04ab	d1 		DE: Number of sectors x 16, E will be number of entries to read
-	ld hl,SBUF		;04ac	21 00 0b 	HL: Disk buffer area
+		pop hl			;04a5	e1 		Pop the number of sectors
+		add hl,hl		;04a6	29 		Multiply by 16
+		add hl,hl		;04a7	29
+		add hl,hl		;04a8	29 
+		add hl,hl		;04a9	29 
+		push hl			;04aa	e5 
+		pop de			;04ab	d1 		DE: Number of sectors x 16, E will be number of entries to read
+		ld hl,SBUF		;04ac	21 00 0b 	HL: Disk buffer area
 ;
-1:	ld a,(hl)		;04af	7e 		Get the first byte of the directory
-	cp 0e5h			;04b0	fe e5 	 	Is it an erased or non-existent file?
-	jr z,2F			;04b2	28 0f 	 	Yes, so skip
+1:		ld a,(hl)		;04af	7e 		Get the first byte of the directory
+		cp 0e5h			;04b0	fe e5 	 	Is it an erased or non-existent file?
+		jr z,2F			;04b2	28 0f 	 	Yes, so skip
 ;
-	ld a,000h		;04b4	3e 00 	 	Send 0 back to the PC
-	call com_writest	;04b6	cd ae 07 	 
-	push hl			;04b9	e5 	 
-	ld bc,00010h		;04ba	01 10 00 	Followed by the directory entry (16 bytes)
-	call com_writebuf	;04bd	cd 7f 06
-	pop hl			;04c0	e1 
-	ld b,000h		;04c1	06 00
+		ld a,000h		;04b4	3e 00 	 	Send 0 back to the PC
+		call com_writest	;04b6	cd ae 07 	 
+		push hl			;04b9	e5 	 
+		ld bc,00010h		;04ba	01 10 00 	Followed by the directory entry (16 bytes)
+		call com_writebuf	;04bd	cd 7f 06
+		pop hl			;04c0	e1 
+		ld b,000h		;04c1	06 00
 ;
-2:	ld c,020h		;04c3	0e 20
-	add hl,bc		;04c5	09		Skip 32 bytes (the size of each directory entry in CP/M	
-	dec e			;04c6	1d 		Decrement the counter
-	jr nz,1B		;04c7	20 e6 		And loop
+2:		ld c,020h		;04c3	0e 20
+		add hl,bc		;04c5	09		Skip 32 bytes (the size of each directory entry in CP/M	
+		dec e			;04c6	1d 		Decrement the counter
+		jr nz,1B		;04c7	20 e6 		And loop
 ;
-	ld a,002h		;04c9	3e 02 		Send a 2 back to the PC to indicate completion
-	call com_writest	;04cb	cd ae 07 	 
-	MCAL	ZOUTC
-	DB	CR 
-	DB	" + DIR track ","-"+0x80
-msent:				;			Output the success error message
-	MCAL	ZOUTC 
-	DB	" Sent    ",CR,LF+0x80
-	jp wait			;04ec	c3 57 01 	Jump back to the main loop
+		ld a,002h		;04c9	3e 02 		Send a 2 back to the PC to indicate completion
+		call com_writest	;04cb	cd ae 07 	 
+		MCAL	ZOUTC
+		DB	CR 
+		DB	" + DIR track ","-"+0x80
+;				
+msent:		MCAL	ZOUTC 		;			Output the success error message
+		DB	" Sent    ",CR,LF+0x80
+		jp wait			;04ec	c3 57 01 	Jump back to the main loop
 
 ; Command: Get the drive config
 ;
-cmd_getdrvcfg;
-	MCAL	ZOUTC 		;			Write out a message
-	DB	CR 
-	DB	" + DRIVE config ","%"+0x80
-	ld a,(SIDFLG)		;0503	3a b1 fb 	Get the double-sided flag
-	call com_writest	;0506	cd ae 07 	Write it out to the PC
-	ld a,(SIDFLG)		;0509	3a b1 fb 
-	call tobin		;050c	cd 74 08 	Output it as binary
-	jr msent		;050f	18 ce 		Output the success message and jump back to the main loop
+cmd_getdrvcfg:	MCAL	ZOUTC 		;			Write out a message
+		DB	CR 
+		DB	" + DRIVE config ","%"+0x80
+		ld a,(SIDFLG)		;0503	3a b1 fb 	Get the double-sided flag
+		call com_writest	;0506	cd ae 07 	Write it out to the PC
+		ld a,(SIDFLG)		;0509	3a b1 fb 
+		call tobin		;050c	cd 74 08 	Output it as binary
+		jr msent		;050f	18 ce 		Output the success message and jump back to the main loop
 
 ; Command: Get the drive parameter address
 ;
-cmd_getdpb:
-	MCAL	ZOUTC 		;			Write out a message
-	DB	CR 
-	DB	" + DP","B"+0x80
-	call dos_getdpb		;			Get the DPB in HL
-	ld bc,0000fh		;051d	01 0f 00 	The DPB is 15 bytes long	 
-	call com_writebuf	;0520	cd 7f 06 	Write it to the PC
-	jr msent		;0523	18 ba 	 	Output the success message and jump back to the main loop
+cmd_getdpb:	MCAL	ZOUTC 		;			Write out a message
+		DB	CR 
+		DB	" + DP","B"+0x80
+		call dos_getdpb		;			Get the DPB in HL
+		ld bc,0000fh		;051d	01 0f 00 	The DPB is 15 bytes long	 
+		call com_writebuf	;0520	cd 7f 06 	Write it to the PC
+		jr msent		;0523	18 ba 	 	Output the success message and jump back to the main loop
 
 ; Command: Set the current disk number
 ;
-cmd_setdisc:
-	call com_readst		;0525	cd 8d 07 	Read the disk number from the PC 
-	push af			;0528	f5 		Stack the drive number
-	add a,030h		;0529	c6 30 		Change it to a digit for display
-	ld (cmd_setdisc1),a	;052b	32 3d 05 	Self-mod the message
-	MCAL	ZOUTC		;			Display the selected disk number
-	DB	CR 
-	DB	" + Set DISC "
-cmd_setdisc1:
-	DB	"0:"," "+0x80
-	pop	af 
-	call dos_seldrv		;0541	cd 60 07 	Set the selected drive
-	jr z,1F			;0544	28 0e 		Skip to error if invalid drive
+cmd_setdisc:	call com_readst		;0525	cd 8d 07 	Read the disk number from the PC 
+		push af			;0528	f5 		Stack the drive number
+		add a,030h		;0529	c6 30 		Change it to a digit for display
+		ld (cmd_setdisc1),a	;052b	32 3d 05 	Self-mod the message
+		MCAL	ZOUTC		;			Display the selected disk number
+		DB	CR 
+		DB	" + Set DISC "
+cmd_setdisc1:	DB	"0:"," "+0x80
+		pop	af 
+		call dos_seldrv		;0541	cd 60 07 	Set the selected drive
+		jr z,1F			;0544	28 0e 		Skip to error if invalid drive
 ;
-	ld a,000h		;0546	3e 00 		Send code 0 back to the PC
-	call com_writest	;0548	cd ae 07 	 
-	MCAL	ZOUTC 		;			Display the success message
-	DB	"Ok",CR,LF+0x80
-	jp wait			;0551	c3 57 01 	Jump back to the main loop
+		ld a,000h		;0546	3e 00 		Send code 0 back to the PC
+		call com_writest	;0548	cd ae 07 	 
+		MCAL	ZOUTC 		;			Display the success message
+		DB	"Ok",CR,LF+0x80
+		jp wait			;0551	c3 57 01 	Jump back to the main loop
 ;
-1:	ld a,001h		;0554	3e 01 		Send code 1 back to the PC
-	call com_writest	;0556	cd ae 07 	 
-	MCAL	ZOUTC 		;			Display the failed error message
-	DB	"Failed",CR,LF+0x80
-	jp wait			;0563	c3 57 01 	Jump back to the main loop
+1:		ld a,001h		;0554	3e 01 		Send code 1 back to the PC
+		call com_writest	;0556	cd ae 07 	 
+		MCAL	ZOUTC 		;			Display the failed error message
+		DB	"Failed",CR,LF+0x80
+		jp wait			;0563	c3 57 01 	Jump back to the main loop
 
 ; Command: Execute
 ;
-cmd_exec:
-	MCAL	ZOUTC 		; 			Display an acknowledgement message
-	DB	CR
-	DB	" - Receive cod","e"+0x80
-	ld a,000h		;0578	3e 00 		Write 000h back to the PC
-	call com_writest	;057a	cd ae 07 	 
-	ld a,00bh		;057d	3e 0b 		Write 00bh back to teh PC
-	call com_writest	;057f	cd ae 07 	 
-	call com_readst		;0582	cd 8d 07 	Read a byte back
-	cp 000h			;0585	fe 00 	 	If it is not zero then
-	jr nz,2F		;0587	20 5d 	   	Error
+cmd_exec:	MCAL	ZOUTC 		; 			Display an acknowledgement message
+		DB	CR
+		DB	" - Receive cod","e"+0x80
+		ld a,000h		;0578	3e 00 		Write 000h back to the PC
+		call com_writest	;057a	cd ae 07 	 
+		ld a,00bh		;057d	3e 0b 		Write 00bh back to teh PC
+		call com_writest	;057f	cd ae 07 	 
+		call com_readst		;0582	cd 8d 07 	Read a byte back
+		cp 000h			;0585	fe 00 	 	If it is not zero then
+		jr nz,2F		;0587	20 5d 	   	Error
 ;
-	call com_readst		;0589	cd 8d 07 	Read HL from the PC
-	ld l,a			;058c	6f 	
-	call com_readst		;058d	cd 8d 07 	 
-	ld h,a			;0590	67 	 
-	call com_readst		;0591	cd 8d 07 	Read B from the PC	 
-	ld b,a			;0594	47 	 
-	ld c,000h		;0595	0e 00 	 	C: 0
-	push hl			;0597	e5 	 
-	push bc			;0598	c5 	
+		call com_readst		;0589	cd 8d 07 	Read HL from the PC
+		ld l,a			;058c	6f 	
+		call com_readst		;058d	cd 8d 07 	 
+		ld h,a			;0590	67 	 
+		call com_readst		;0591	cd 8d 07 	Read B from the PC	 
+		ld b,a			;0594	47 	 
+		ld c,000h		;0595	0e 00 	 	C: 0
+		push hl			;0597	e5 	 
+		push bc			;0598	c5 	
 ; 
-1:	push bc			;0599	c5 	 
-	ld bc,00100h		;059a	01 00 01 	Read two pages in from the PC 
-	call com_readbuf	;059d	cd c6 06 	 
-	pop bc			;05a0	c1 	 
-	djnz 1B			;05a1	10 f6 	 
-	ld hl,FBUF		;05a3	21 80 00	Read another 32 bytes in
-	ld bc,00020h		;05a6	01 20 00 	
-	call com_readbuf	;05a9	cd c6 06 	 
-	MCAL	ZOUTC		;			Display a message
-	DB	CR 
-	DB	" + Executing   ",CR,LF,LF+0x80
-	call com_readst		;05c1	cd 8d 07 	Read in DE	 
-	ld e,a			;05c4	5f 	
-	call com_readst		;05c5	cd 8d 07 	 
-	ld d,a			;05c8	57 	
-	ld hl,000fbh		;05c9	21 fb 00 	
-	ld a,0edh		;05cc	3e ed 		000fbh = 0edh
-	ld (hl),a		;05ce	77 			
-	inc hl			;05cf	23 	
-	ld a,0b0h		;05d0	3e b0 	
-	ld (hl),a		;05d2	77 		000fch = 0b0h (LDIR)
-	inc hl			;05d3	23 	
-	ld a,0c3h		;05d4	3e c3 	
-	ld (hl),a		;05d6	77 		000fdh = 0c3h (JP)
-	inc hl			;05d7	23 	
-	call com_readst		;05d8	cd 8d 07 	Read the address in from the PC
-	ld (hl),a		;05db	77 		And write it after the jump instruction
-	inc hl			;05dc	23 	
-	call com_readst		;05dd	cd 8d 07 	 
-	ld (hl),a		;05e0	77 	
-	pop bc			;05e1	c1 	
-	pop hl			;05e2	e1 	
-	jp 000fbh		;05e3	c3 fb 00 	Jump to 000fbh; this moves the program and executes it
+1:		push bc			;0599	c5 	 
+		ld bc,00100h		;059a	01 00 01 	Read two pages in from the PC 
+		call com_readbuf	;059d	cd c6 06 	 
+		pop bc			;05a0	c1 	 
+		djnz 1B			;05a1	10 f6 	 
+		ld hl,FBUF		;05a3	21 80 00	Read another 32 bytes in
+		ld bc,00020h		;05a6	01 20 00 	
+		call com_readbuf	;05a9	cd c6 06 	 
+		MCAL	ZOUTC		;			Display a message
+		DB	CR 
+		DB	" + Executing   ",CR,LF,LF+0x80
+		call com_readst		;05c1	cd 8d 07 	Read in DE	 
+		ld e,a			;05c4	5f 	
+		call com_readst		;05c5	cd 8d 07 	 
+		ld d,a			;05c8	57 	
+		ld hl,000fbh		;05c9	21 fb 00 	
+		ld a,0edh		;05cc	3e ed 		000fbh = 0edh
+		ld (hl),a		;05ce	77 			
+		inc hl			;05cf	23 	
+		ld a,0b0h		;05d0	3e b0 	
+		ld (hl),a		;05d2	77 		000fch = 0b0h (LDIR)
+		inc hl			;05d3	23 	
+		ld a,0c3h		;05d4	3e c3 	
+		ld (hl),a		;05d6	77 		000fdh = 0c3h (JP)
+		inc hl			;05d7	23 	
+		call com_readst		;05d8	cd 8d 07 	Read the address in from the PC
+		ld (hl),a		;05db	77 		And write it after the jump instruction
+		inc hl			;05dc	23 	
+		call com_readst		;05dd	cd 8d 07 	 
+		ld (hl),a		;05e0	77 	
+		pop bc			;05e1	c1 	
+		pop hl			;05e2	e1 	
+		jp 000fbh		;05e3	c3 fb 00 	Jump to 000fbh; this moves the program and executes it
 ;	 
-2:	MCAL	ZOUTC 		;			Display error message
-	DB	CR 
-	DB	" + Exec failed ",CR,LF+0x80
-	jp wait			;05fa	c3 57 01 	
+2:		MCAL	ZOUTC 		;			Display error message
+		DB	CR 
+		DB	" + Exec failed ",CR,LF+0x80
+		jp wait			;05fa	c3 57 01 	
 
 ; Command: Delete file
 ;
-cmd_delfile:
-	call com_getfilename	;05fd	cd 5c 06	Get the filename from the PC	
-	call dispfile		;0600	cd 85 08 	Display it
-	call dos_erasefile	;0603	cd 3a 07 	Erase the file
-	jr z,1F			;0606	28 16 		If file not found then skip	
-	ld a,000h		;0608	3e 00 		Return 0 back to PC if file deleted
-	call com_writest	;060a	cd ae 07 	 
-	MCAL	ZOUTC 		;			Display success message
-	DB	"deleted",CR," +",CR,LF+0x80
-	jp wait			;061b	c3 57 01 	
-1:	ld a,002h		;061e	3e 02 		Return 2 back to the PC if file not found
-	call com_writest	;0620	cd ae 07 	
-	MCAL	ZOUTC 		;			Display error message
-	DB	"not found",CR," +",CR,LF+0x80
-	jp wait			;0633	c3 57 01 	
+cmd_delfile:	call com_filename	;05fd	cd 5c 06	Get the filename from the PC	
+		call dispfile		;0600	cd 85 08 	Display it
+		call dos_erasefile	;0603	cd 3a 07 	Erase the file
+		jr z,1F			;0606	28 16 		If file not found then skip	
+		ld a,000h		;0608	3e 00 		Return 0 back to PC if file deleted
+		call com_writest	;060a	cd ae 07 	 
+		MCAL	ZOUTC 		;			Display success message
+		DB	"deleted",CR," +",CR,LF+0x80
+		jp wait			;061b	c3 57 01 	
+;
+1:		ld a,002h		;061e	3e 02 		Return 2 back to the PC if file not found
+		call com_writest	;0620	cd ae 07 	
+		MCAL	ZOUTC 		;			Display error message
+		DB	"not found",CR," +",CR,LF+0x80
+		jp wait			;0633	c3 57 01 	
 
 ; Command: Rename file
 ;
-cmd_renfile:
-	call com_getfilename	;0636	cd 5c 06	Get the original filename from the PC in var_file1
-	call dispfile		;0639	cd 85 08 	Display it
-	ld hl,var_file2		;063c	21 cd 08 	
-	push hl			;063f	e5 		
-	call com_getfilename_1	;0640	cd 5f 06 	Get the new filename from the PC in var_file2
-	pop hl			;0643	e1 		
-	call dispfile_1		;0644	cd 88 08 	Display it
-	call dos_renamefile	;0647	cd 44 07 	Rename the file
-	ld a,002h		;064a	3e 02 			
-	jr z,1F			;064c	28 02 		If not found then return 2 back to the PC	
-	ld a,000h		;064e	3e 00 		Otherwise return 0
-1:	call com_writest	;0650	cd ae 07 	Send the return code back 
-	MCAL	ZOUTC 		;			Display message
-	DB	" +",CR,LF+0x80 
-	jp wait			;0659	c3 57 01 	And loop back to wait for the next command
+cmd_renfile:	call com_filename	;0636	cd 5c 06	Get the original filename from the PC in var_file1
+		call dispfile		;0639	cd 85 08 	Display it
+		ld hl,var_file2		;063c	21 cd 08 	
+		push hl			;063f	e5 		
+		call com_filename1	;0640	cd 5f 06 	Get the new filename from the PC in var_file2
+		pop hl			;0643	e1 		
+		call dispfile1		;0644	cd 88 08 	Display it
+		call dos_renamefile	;0647	cd 44 07 	Rename the file
+		ld a,002h		;064a	3e 02 			
+		jr z,1F			;064c	28 02 		If not found then return 2 back to the PC	
+		ld a,000h		;064e	3e 00 		Otherwise return 0
+1:		call com_writest	;0650	cd ae 07 	Send the return code back 
+		MCAL	ZOUTC 		;			Display message
+		DB	" +",CR,LF+0x80 
+		jp wait			;0659	c3 57 01 	And loop back to wait for the next command
 
 ; Get a filename from the PC
 ;
-com_getfilename:
-	ld hl,var_file1		;065c	21 bd 08 	Pointer to the file buffer variable 
-com_getfilename_1:
-	push hl			;065f	e5 		Stack the buffer address
-	ld b,12			;0660	06 0c 	 	Number of bytes to read in	
-1:	call com_readst		;0662	cd 8d 07 	Read a character in from the serial port
-	ld (hl),a		;0665	77 		Store in the buffer
-	inc hl			;0666	23 		Increment the pointer
-	djnz 1B			;0667	10 f9 	 	And loop
-	xor a			;0669	af  			
-	ld b,015h		;066a	06 15 	 	Clear out the next 21 bytes
-2:	ld (hl),a		;066c	77 	
-	inc hl			;066d	23 	
-	djnz 2B			;066e	10 fc 	
-	pop hl			;0670	e1 		Restore the buffer address
-	ld a,(hl)		;0671	7e 		Get the drive number
-	sub 02fh		;0672	d6 2f 		Convert it from ASCII to decimal
-	ld (hl),a		;0674	77 		
-	ret			;0675	c9 		And return
+com_filename:	ld hl,var_file1		;065c	21 bd 08 	Pointer to the file buffer variable 
+;
+com_filename1:	push hl			;065f	e5 		Stack the buffer address
+		ld b,12			;0660	06 0c 	 	Number of bytes to read in	
+1:		call com_readst		;0662	cd 8d 07 	Read a character in from the serial port
+		ld (hl),a		;0665	77 		Store in the buffer
+		inc hl			;0666	23 		Increment the pointer
+		djnz 1B			;0667	10 f9 	 	And loop
+		xor a			;0669	af  			
+		ld b,015h		;066a	06 15 	 	Clear out the next 21 bytes
+2:		ld (hl),a		;066c	77 	
+		inc hl			;066d	23 	
+		djnz 2B			;066e	10 fc 	
+		pop hl			;0670	e1 		Restore the buffer address
+		ld a,(hl)		;0671	7e 		Get the drive number
+		sub 02fh		;0672	d6 2f 		Convert it from ASCII to decimal
+		ld (hl),a		;0674	77 		
+		ret			;0675	c9 		And return
 
-sub_0676h:
-	ld hl,var_08e1h		;0676	21 e1 08 	
-	ld a,(var_08e0h)	;0679	3a e0 08 	
-	ld c,a			;067c	4f 	
-	ld b,000h		;067d	06 00 	 
+sub_0676h:	ld hl,var_08e1h		;0676	21 e1 08 	
+		ld a,(var_08e0h)	;0679	3a e0 08 	
+		ld c,a			;067c	4f 	
+		ld b,000h		;067d	06 00 	 
 ;
 ; HL: Pointer
 ; BC: Counter
 ;
-com_writebuf:
-	push de			;067f	d5 
-	push hl			;0680	e5 	
-	push bc			;0681	c5 	
-	ld e,(hl)		;0682	5e 		Get first byte in E
-	inc hl			;0683	23 		Increase pointer
-	dec bc			;0684	0b 		Decrease counter
+com_writebuf:	push de			;067f	d5 
+		push hl			;0680	e5 	
+		push bc			;0681	c5 	
+		ld e,(hl)		;0682	5e 		Get first byte in E
+		inc hl			;0683	23 		Increase pointer
+		dec bc			;0684	0b 		Decrease counter
 ;
-1:	ld a,e			;0685	7b 		Check if subsequent bytes are		
-	cp (hl)			;0686	be 		the same as the first
-	jr nz,2F		;0687	20 14 		If not, then exit the loop
-	inc hl			;0689	23 	
-	dec bc			;068a	0b 	
-	ld a,b			;068b	78 	
-	or c			;068c	b1 	
-	jr nz,1B		;068d	20 f6 		Loop
+1:		ld a,e			;0685	7b 		Check if subsequent bytes are		
+		cp (hl)			;0686	be 		the same as the first
+		jr nz,2F		;0687	20 14 		If not, then exit the loop
+		inc hl			;0689	23 	
+		dec bc			;068a	0b 	
+		ld a,b			;068b	78 	
+		or c			;068c	b1 	
+		jr nz,1B		;068d	20 f6 		Loop
 ;
-	pop bc			;068f	c1 		At this point we've confirmed the buffer is
-	pop hl			;0690	e1 		just full of the same byte
-	ld a,003h		;0691	3e 03 		Send 3 back to the PC to indicate block is run length encoded
-	call com_writest	;0693	cd ae 07 	 
-	ld a,(hl)		;0696	7e 	
-	call com_writest	;0697	cd ae 07 	And the byte in the buffer
-	add hl,bc		;069a	09 	
-	pop de			;069b	d1 	
-	ret			;069c	c9 	
+		pop bc			;068f	c1 		At this point we've confirmed the buffer is
+		pop hl			;0690	e1 		just full of the same byte
+		ld a,003h		;0691	3e 03 		Send 3 back to the PC to indicate block is run length encoded
+		call com_writest	;0693	cd ae 07 	 
+		ld a,(hl)		;0696	7e 	
+		call com_writest	;0697	cd ae 07 	And the byte in the buffer
+		add hl,bc		;069a	09 	
+		pop de			;069b	d1 	
+		ret			;069c	c9 	
 ;
-2:	pop bc			;069d	c1 		Send 0 back to the PC to indicate it is a data stream
-	pop hl			;069e	e1 	
-	ld a,000h		;069f	3e 00 	
-	call com_writest	;06a1	cd ae 07
+2:		pop bc			;069d	c1 		Send 0 back to the PC to indicate it is a data stream
+		pop hl			;069e	e1 	
+		ld a,000h		;069f	3e 00 	
+		call com_writest	;06a1	cd ae 07
 ;
-3:	push hl			;06a4	e5 	
-	push bc			;06a5	c5 	 
-	ld e,000h		;06a6	1e 00 	 	Checksum
+3:		push hl			;06a4	e5 	
+		push bc			;06a5	c5 	 
+		ld e,000h		;06a6	1e 00 	 	Checksum
 ;
-4:	ld a,(hl)		;06a8	7e 		Get the byte from the buffer
-	inc hl			;06a9	23 		Increment the pointer
-	call com_writest	;06aa	cd ae 07 	Send it to the PC
-	add a,e			;06ad	83 		Adjust the checksum
-	ld e,a			;06ae	5f 	
-	dec bc			;06af	0b 	
-	ld a,b			;06b0	78 	
-	or c			;06b1	b1 	
-	jr nz,4B		;06b2	20 f4 		Loop until finished
-	ld a,e			;06b4	7b 		Get the checksum
-	call com_writest	;06b5	cd ae 07 	Write it to the PC
-	call com_readst		;06b8	cd 8d 07 	Get the result back
-	cp e			;06bb	bb 		If it is the same as the checksum then
-	jr z,5F			;06bc	28 04 		We are finished
-	pop bc			;06be	c1 	
-	pop hl			;06bf	e1 	
-	jr 3B			;06c0	18 e2 		Otherwise keep looping
+4:		ld a,(hl)		;06a8	7e 		Get the byte from the buffer
+		inc hl			;06a9	23 		Increment the pointer
+		call com_writest	;06aa	cd ae 07 	Send it to the PC
+		add a,e			;06ad	83 		Adjust the checksum
+		ld e,a			;06ae	5f 	
+		dec bc			;06af	0b 	
+		ld a,b			;06b0	78 	
+		or c			;06b1	b1 	
+		jr nz,4B		;06b2	20 f4 		Loop until finished
+		ld a,e			;06b4	7b 		Get the checksum
+		call com_writest	;06b5	cd ae 07 	Write it to the PC
+		call com_readst		;06b8	cd 8d 07 	Get the result back
+		cp e			;06bb	bb 		If it is the same as the checksum then
+		jr z,5F			;06bc	28 04 		We are finished
+		pop bc			;06be	c1 	
+		pop hl			;06bf	e1 	
+		jr 3B			;06c0	18 e2 		Otherwise keep looping
 ;
-5:	pop bc			;06c2	c1 	
-	pop de			;06c3	d1 	
-	pop de			;06c4	d1 	
-	ret			;06c5	c9 	
+5:		pop bc			;06c2	c1 	
+		pop de			;06c3	d1 	
+		pop de			;06c4	d1 	
+		ret			;06c5	c9 	
 
 ; Fill a buffer with a single byte or data from the PC
 ; HL: Pointer to the buffer
 ; BC: Number of byte to read
 ;
-com_readbuf:
-	push de			;06c6	d5 	
-	call com_readst		;06c7	cd 8d 07 	Read a parameter byte from the PC
-	cp 003h			;06ca	fe 03 	 	
-	jr nz,1F		;06cc	20 0f 	  	If it is not 3 then skip the next bit
+com_readbuf:	push de			;06c6	d5 	
+		call com_readst		;06c7	cd 8d 07 	Read a parameter byte from the PC
+		cp 003h			;06ca	fe 03 	 	
+		jr nz,1F		;06cc	20 0f 	  	If it is not 3 then skip the next bit
 ;
 ; Fill the buffer with a byte (run length encoding)
 ;
-	call com_readst		;06ce	cd 8d 07 	Read a byte from the PC 
-	push bc			;06d1	c5 	
-	push hl			;06d2	e5 	
-	pop de			;06d3	d1 	
-	ld (hl),a		;06d4	77 		Store it in the first byte of the buffer
-	inc de			;06d5	13 		And fill the rest of the buffer with it
-	dec bc			;06d6	0b 	
-	ldir			;06d7	ed b0 	
-	inc hl			;06d9	23 	
-	pop bc			;06da	c1 	
-	pop de			;06db	d1 	
-	ret			;06dc	c9 	
+		call com_readst		;06ce	cd 8d 07 	Read a byte from the PC 
+		push bc			;06d1	c5 	
+		push hl			;06d2	e5 	
+		pop de			;06d3	d1 	
+		ld (hl),a		;06d4	77 		Store it in the first byte of the buffer
+		inc de			;06d5	13 		And fill the rest of the buffer with it
+		dec bc			;06d6	0b 	
+		ldir			;06d7	ed b0 	
+		inc hl			;06d9	23 	
+		pop bc			;06da	c1 	
+		pop de			;06db	d1 	
+		ret			;06dc	c9 	
 ;
 ; Fill the buffer with data stream from the PC
 ;
-1:	push hl			;06dd	e5 	
-	push bc			;06de	c5 	
-	ld e,000h		;06df	1e 00 		Checksum?
-2:	call com_readst		;06e1	cd 8d 07 	Read a byte from the PC	 
-	ld (hl),a		;06e4	77 		Store in memory
-	inc hl			;06e5	23 		Increase the memory pointer
-	add a,e			;06e6	83 		Add the byte to the checksum	
-	ld e,a			;06e7	5f 	
-	dec bc			;06e8	0b 		Decrease the counter
-	ld a,b			;06e9	78 	
-	or c			;06ea	b1 	
-	jr nz,2B		;06eb	20 f4 		And loop until finished
-	ld a,e			;06ed	7b 		Get the checksum
-	call com_writest	;06ee	cd ae 07 	Write it to the PC
-	call com_readst		;06f1	cd 8d 07 	Read the result back
-	cp e			;06f4	bb 	
-	jr z,3F			;06f5	28 04 		If they match then finish
-	pop bc			;06f7	c1 		Otherwise keep looping
-	pop hl			;06f8	e1 	
-	jr 1B			;06f9	18 e2 	
+1:		push hl			;06dd	e5 	
+		push bc			;06de	c5 	
+		ld e,000h		;06df	1e 00 		Checksum?
+2:		call com_readst		;06e1	cd 8d 07 	Read a byte from the PC	 
+		ld (hl),a		;06e4	77 		Store in memory
+		inc hl			;06e5	23 		Increase the memory pointer
+		add a,e			;06e6	83 		Add the byte to the checksum	
+		ld e,a			;06e7	5f 	
+		dec bc			;06e8	0b 		Decrease the counter
+		ld a,b			;06e9	78 	
+		or c			;06ea	b1 	
+		jr nz,2B		;06eb	20 f4 		And loop until finished
+		ld a,e			;06ed	7b 		Get the checksum
+		call com_writest	;06ee	cd ae 07 	Write it to the PC
+		call com_readst		;06f1	cd 8d 07 	Read the result back
+		cp e			;06f4	bb 	
+		jr z,3F			;06f5	28 04 		If they match then finish
+		pop bc			;06f7	c1 		Otherwise keep looping
+		pop hl			;06f8	e1 	
+		jr 1B			;06f9	18 e2 	
 ;
-3:	pop bc			;06fb	c1 	
-	pop de			;06fc	d1 	
-	pop de			;06fd	d1 	
-	ret			;06fe	c9 	
+3:		pop bc			;06fb	c1 	
+		pop de			;06fc	d1 	
+		pop de			;06fd	d1 	
+		ret			;06fe	c9 	
 
-filehandle:
-	DB	0		;06ff	00 	
+var_filehandle:	DB	0		;06ff	00 	
 
 ; Output to console
 ;  A: Character to output
 ;
-dos_conout:
-	ld e,a			;0700	5f 		The character to output
-	ld c,002h		;0701	0e 02 	 	
-	jp DOS			;0703	c3 05 00 	Call the DOS function 
+dos_conout:	ld e,a			;0700	5f 		The character to output
+		ld c,002h		;0701	0e 02 	 	
+		jp DOS			;0703	c3 05 00 	Call the DOS function 
 
-dos_openfile:
-	ld de,var_file1		;0706	11 bd 08 	FDESC ADDRESS
-	ld c,00fh		;0709	0e 0f 	 	Open file
-	call doscall		;070b	cd da 01
-	inc a			;070e	3c 	
-	ld (filehandle),a	;070f	32 ff 06 	
-	ret			;0712	c9 
+dos_openfile:	ld de,var_file1		;0706	11 bd 08 	FDESC ADDRESS
+		ld c,00fh		;0709	0e 0f 	 	Open file
+		call doscall		;070b	cd da 01
+		inc a			;070e	3c 	
+		ld (var_filehandle),a	;070f	32 ff 06 	
+		ret			;0712	c9 
 
 ; Read from a file
 ;
-dos_readfile:
-	ld de,var_file1		;0713	11 bd 08 	FDESC address
-	ld c,014h		;0716	0e 14 	 	Read sequential
-	call doscall		;0718	cd da 01 	 
-	or a			;071b	b7 		Returns NZ if end of file
-	ret			;071c	c9 	
+dos_readfile:	ld de,var_file1		;0713	11 bd 08 	FDESC address
+		ld c,014h		;0716	0e 14 	 	Read sequential
+		call doscall		;0718	cd da 01 	 
+		or a			;071b	b7 		Returns NZ if end of file
+		ret			;071c	c9 	
 
 ; Write to a file
 ;
-dos_writefile:
-	ld de,var_file1		;071d	11 bd 08 	FDESC address
-	ld c,015h		;0720	0e 15 	 	Write sequential
-	call doscall		;0722	cd da 01 	 
-	or a			;0725	b7 		Returns NZ if disk is full
-	ret			;0726	c9 	
+dos_writefile:	ld de,var_file1		;071d	11 bd 08 	FDESC address
+		ld c,015h		;0720	0e 15 	 	Write sequential
+		call doscall		;0722	cd da 01 	 
+		or a			;0725	b7 		Returns NZ if disk is full
+		ret			;0726	c9 	
 
 ; Close a file
 ; Returns:
 ; - F: Z if not found, otherwise NZ
 ;
-dos_closefile:
-	ld a,(filehandle)	;0727	3a ff 06 	Get the filehandle	 
-	or a			;072a	b7 		Is it open?
-	ret z			;072b	c8 		No so just return
-	xor a			;072c	af 		Reset the filehandle
-	ld (filehandle),a	;072d	32 ff 06 	
-	ld de,var_file1		;0730	11 bd 08 	
-	ld c,010h		;0733	0e 10 	 	Close file
-	call doscall		;0735	cd da 01 	 
-	inc a			;0738	3c 		
-	ret			;0739	c9 	
+dos_closefile:	ld a,(var_filehandle)	;0727	3a ff 06 	Get the filehandle	 
+		or a			;072a	b7 		Is it open?
+		ret z			;072b	c8 		No so just return
+		xor a			;072c	af 		Reset the filehandle
+		ld (var_filehandle),a	;072d	32 ff 06 	
+		ld de,var_file1		;0730	11 bd 08 	
+		ld c,010h		;0733	0e 10 	 	Close file
+		call doscall		;0735	cd da 01 	 
+		inc a			;0738	3c 		
+		ret			;0739	c9 	
 
 ; Erase a file
 ; Returns:
 ; - F: Z if not found, otherwise NZ
 ;
-dos_erasefile:
-	ld de,var_file1		;073a	11 bd 08 	 
-	ld c,013h		;073d	0e 13 	 	Erase file	
-	call doscall		;073f	cd da 01 	 
-	inc a			;0742	3c 		Returns 0FFh if not found
-	ret			;0743	c9 	
+dos_erasefile:	ld de,var_file1		;073a	11 bd 08 	 
+		ld c,013h		;073d	0e 13 	 	Erase file	
+		call doscall		;073f	cd da 01 	 
+		inc a			;0742	3c 		Returns 0FFh if not found
+		ret			;0743	c9 	
 
 ; Rename a file
 ; Returns:
 ; - F: Z if not found, otherwise NZ
 ;
-dos_renamefile:
-	ld de,var_file1		;0744	11 bd 08 	 
-	ld c,017h		;0747	0e 17 	 	Rename file
-	call doscall		;0749	cd da 01 	 
-	inc a			;074c	3c 		Returns 0FFh if not found
-	ret			;074d	c9 	
+dos_renamefile:	ld de,var_file1		;0744	11 bd 08 	 
+		ld c,017h		;0747	0e 17 	 	Rename file
+		call doscall		;0749	cd da 01 	 
+		inc a			;074c	3c 		Returns 0FFh if not found
+		ret			;074d	c9 	
 
-dos_createfile:
-	ld de,var_file1		;074e	11 bd 08 	 
-	ld c,016h		;0751	0e 16 	 	Create file
-	call doscall		;0753	cd da 01 	 
-	inc a			;0756	3c 	 
-	ld (filehandle),a	;0757	32 ff 06  
-	ret			;075a	c9 
+dos_createfile:	ld de,var_file1		;074e	11 bd 08 	 
+		ld c,016h		;0751	0e 16 	 	Create file
+		call doscall		;0753	cd da 01 	 
+		inc a			;0756	3c 	 
+		ld (var_filehandle),a	;0757	32 ff 06  
+		ret			;075a	c9 
 
-dos_getdpb:	
-	ld c,01fh		;075b	0e 1f 	 	Get drive parameter address
-	jp doscall		;075d	c3 da 01 	 
+dos_getdpb:	ld c,01fh		;075b	0e 1f 	 	Get drive parameter address
+		jp doscall		;075d	c3 da 01 	 
 
 ; Select the drive number
 ;  A: Drive number
 ; Returns
 ; - F: Z if invalid drive, otherwise NZ
 ;
-dos_seldrv:
-	ld e,a			;0760	5f
-	ld c,00eh		;0761	0e 0e 	 	Select drive
-	call doscall		;0763	cd da 01 	 
-	inc a			;0766	3c		
-	ret			;0767	c9 	
+dos_seldrv:	ld e,a			;0760	5f
+		ld c,00eh		;0761	0e 0e 	 	Select drive
+		call doscall		;0763	cd da 01 	 
+		inc a			;0766	3c		
+		ret			;0767	c9 	
 
-dos_setbuf:
-	ld de,FBUF		;0768	11 80 00 	FDESC address
-	ld c,01ah		;076b	0e 1a 	 	Set buffer address
-	jp DOS			;076d	c3 05 00 	 
+dos_setbuf:	ld de,FBUF		;0768	11 80 00 	FDESC address
+		ld c,01ah		;076b	0e 1a 	 	Set buffer address
+		jp DOS			;076d	c3 05 00 	 
 
 ; Flush the serial buffer
 ;
-com_flush:
-	call com_setcts		;0770	cd 7f 07 	Assert CTS
-1:	in a,(010h)		;0773	db 10 	 	Read a character in
-	in a,(011h)		;0775	db 11 	 	Check if the RX buffer has any more characters in it
-	bit 1,a			;0777	cb 4f 	
-	jr nz,1B		;0779	20 f8 	   	Yes so loop
-	call com_rescts		;077b	cd 86 07 	Deassert CTS 
-	ret			;077e	c9 	
+com_flush:	call com_setcts		;0770	cd 7f 07 	Assert CTS
+1:		in a,(010h)		;0773	db 10 	 	Read a character in
+		in a,(011h)		;0775	db 11 	 	Check if the RX buffer has any more characters in it
+		bit 1,a			;0777	cb 4f 	
+		jr nz,1B		;0779	20 f8 	   	Yes so loop
+		call com_rescts		;077b	cd 86 07 	Deassert CTS 
+		ret			;077e	c9 	
 
 ; Set the CTS flag on the UART
 ;
-com_setcts:
-	push af			;077f	f5 	
-	ld a,027h		;0780	3e 27 	
-	out (011h),a		;0782	d3 11 	
-	pop af			;0784	f1 	
-	ret			;0785	c9 	
+com_setcts:	push af			;077f	f5 	
+		ld a,027h		;0780	3e 27 	
+		out (011h),a		;0782	d3 11 	
+		pop af			;0784	f1 	
+		ret			;0785	c9 	
 
 ; Reset the CTS flag on the UART
 ;
-com_rescts:
-	push af			;0786	f5 	
-	ld a,007h		;0787	3e 07 	
-	out (011h),a		;0789	d3 11 	
-	pop af			;078b	f1 	
-	ret			;078c	c9 	
+com_rescts:	push af			;0786	f5 	
+		ld a,007h		;0787	3e 07 	
+		out (011h),a		;0789	d3 11 	
+		pop af			;078b	f1 	
+		ret			;078c	c9 	
 
 ; Read a byte in from the serial port with timeout
 ;
-com_readst:
-	call com_setcts		;078d	cd 7f 07 
-	push hl			;0790	e5 	
-	push de			;0791	d5 	
-	ld hl,00000h		;0792	21 00 00 	  
-	ld e,008h		;0795	1e 08 	 
-com_readst1:
-	in a,(011h)		;0797	db 11 	 
-	dec l			;0799	2d 	
-	jr nz,com_readst2	;079a	20 06 	
-	dec h			;079c	25 	
-	jr nz,com_readst2	;079d	20 03 	
-	dec e			;079f	1d 	
-	jr z,msg_timeout	;07a0	28 29 	
-com_readst2:
-	bit 1,a			;07a2	cb 4f 	
-	jr z,com_readst1	;07a4	28 f1 	
-	in a,(010h)		;07a6	db 10 	
-	pop de			;07a8	d1 	
-	pop hl			;07a9	e1 	
-	call com_rescts		;07aa	cd 86 07 	 
-	ret			;07ad	c9 	
+com_readst:	call com_setcts		;078d	cd 7f 07 
+		push hl			;0790	e5 	
+		push de			;0791	d5 	
+		ld hl,00000h		;0792	21 00 00 	  
+		ld e,008h		;0795	1e 08 	 
+;
+1:		in a,(011h)		;0797	db 11 	 
+		dec l			;0799	2d 	
+		jr nz,2F		;079a	20 06 	
+		dec h			;079c	25 	
+		jr nz,2F		;079d	20 03 	
+		dec e			;079f	1d 	
+		jr z,msg_timeout	;07a0	28 29 	
+;
+2:		bit 1,a			;07a2	cb 4f 	
+		jr z,1B		;07a4	28 f1 	
+		in a,(010h)		;07a6	db 10 	
+		pop de			;07a8	d1 	
+		pop hl			;07a9	e1 	
+		call com_rescts		;07aa	cd 86 07 	 
+		ret			;07ad	c9 	
 
 ; Write a byte out to the serial port with timeout
 ;
-com_writest:
-	push af			;07ae	f5 	
-	push hl			;07af	e5 	
-	push de			;07b0	d5 	
-	ld hl,00000h		;07b1	21 00 00
-	ld e,008h		;07b4	1e 08 	 
-com_writest1:
-	in a,(011h)		;07b6	db 11 	 
-	dec l			;07b8	2d 	
-	jr nz,com_writest2	;07b9	20 06 	
-	dec h			;07bb	25 	
-	jr nz,com_writest2	;07bc	20 03 	
-	dec e			;07be	1d 	
-	jr z,msg_timeout	;07bf	28 0a 	
-com_writest2:
-	bit 0,a			;07c1	cb 47 	
-	jr z,com_writest1	;07c3	28 f1 	
-	pop de			;07c5	d1 	
-	pop hl			;07c6	e1 	
-	pop af			;07c7	f1 	
-	out (010h),a		;07c8	d3 10 	
-	ret			;07ca	c9 	
+com_writest:	push af			;07ae	f5 	
+		push hl			;07af	e5 	
+		push de			;07b0	d5 	
+		ld hl,00000h		;07b1	21 00 00
+		ld e,008h		;07b4	1e 08 	 
+;
+1:		in a,(011h)		;07b6	db 11 	 
+		dec l			;07b8	2d 	
+		jr nz,2F		;07b9	20 06 	
+		dec h			;07bb	25 	
+		jr nz,2F		;07bc	20 03 	
+		dec e			;07be	1d 	
+		jr z,msg_timeout	;07bf	28 0a 	
+;
+2:		bit 0,a			;07c1	cb 47 	
+		jr z,1B			;07c3	28 f1 	
+		pop de			;07c5	d1 	
+		pop hl			;07c6	e1 	
+		pop af			;07c7	f1 	
+		out (010h),a		;07c8	d3 10 	
+		ret			;07ca	c9 	
 
 ; Print a timeout message out
 ;
-msg_timeout:
-	MCAL	ZOUTC		;07cb
-	DB	" - TIMEOUT","!"+0x80
+msg_timeout:	MCAL	ZOUTC		;07cb
+		DB	" - TIMEOUT","!"+0x80
 ;
 ; Print a reset message out
 ;
-cmd_reset:
-	MCAL	ZOUTC		;			Display the reset message
-	DB	CR,LF
-	DB	"---- RESET ----",LF,CR+0x80
-	call dos_closefile	;07ed	cd 27 07 	Close any open files
-	jp warm			;07f0	c3 4e 01 	Warm start
+cmd_reset:	MCAL	ZOUTC		;			Display the reset message
+		DB	CR,LF
+		DB	"---- RESET ----",LF,CR+0x80
+		call dos_closefile	;07ed	cd 27 07 	Close any open files
+		jp warm			;07f0	c3 4e 01 	Warm start
 
 ; Read a byte in from the serial port
 ;
-reads:
-	call com_setcts		;07f3	cd 7f 07 
-reads1:
-	in a,(011h)		;07f6	db 11 	
-	bit 1,a			;07f8	cb 4f 
-	jr z,reads1		;07fa	28 fa 	
-	in a,(010h)		;07fc	db 10 	 
-	call com_rescts		;07fe	cd 86 07 	 
-	ret			;0801	c9 	
+reads:		call com_setcts		;07f3	cd 7f 07 
+1:		in a,(011h)		;07f6	db 11 	
+		bit 1,a			;07f8	cb 4f 
+		jr z,1B			;07fa	28 fa 	
+		in a,(010h)		;07fc	db 10 	 
+		call com_rescts		;07fe	cd 86 07 	 
+		ret			;0801	c9 	
 
 ; Write the physical disk parameters to the OS
 ;  A: The disk drive number
 ; HL: The disk buffer area
 ; BC: The disk track number
 ;
-setdisk:
-	ld (PHYDSC),a		;0802	32 50 fb 	
-	ld (PHYBUF),hl		;0805	22 53 fb 	
-	ld (PHYTRK),bc		;0808	ed 43 51 fb 	
-	ret			;080c	c9 	
+setdisk:	ld (PHYDSC),a		;0802	32 50 fb 	
+		ld (PHYBUF),hl		;0805	22 53 fb 	
+		ld (PHYTRK),bc		;0808	ed 43 51 fb 	
+		ret			;080c	c9 	
 
 ; Display track read/write operations
 ;  A: 0: Prefix with read, 1: Prefix with write
 ; 
-dispdiskop:
-	push bc			;080d	c5 	
-	push de			;080e	d5 	
-	push hl			;080f	e5 	
-	push af			;0810	f5 	
-	MCAL	ZOUTC
-	DB 	CR 
-	DB	" -"," "+0x80
-	pop af			;0817	f1 	
-	or a			;0818	b7 	
-	jr nz,1F		;0819	20 09 	
-	MCAL	ZOUTC 
-	DB	"Read"," "+0x80
-	jr 2F			;0822	18 07 	 	
-1:	MCAL	ZOUTC 
-	DB	"Writ","e"+0x80
-2:	ld a,(PHYDSC)		;082b	3a 50 fb 	
-	add a,030h		;082e	c6 30 	
-	ld (dispdiskop_1),a	;0830	32 48 08 	
-	ld a,(PHYTRK)		;0833	3a 51 fb 	
-	ld hl,dispdiskop_2	;0836	21 51 08 	
-	call todec		;0839	cd 62 08 	
-	ld a,(PHYSEC)		;083c	3a 52 fb 	
-	ld hl,dispdiskop_3	;083f	21 5b 08 	
-	call todec		;0842	cd 62 08 	
-	MCAL	ZOUTC		;0845
-	DB	" "		;0847
-dispdiskop_1:
-	DB	"0"		;0848
-	DB	": Track "	;0849
-dispdiskop_2:
-	DB	"00"		;0851
-	DB	" Sector "	;0853
-dispdiskop_3:
-	DB	"00"		;085B
-	DB	" "+0x80
-	pop hl			;085e	e1 	
-	pop de			;085f	d1 	
-	pop bc			;0860	c1 	
-	ret			;0861	c9 	
+dispdiskop:	push bc			;080d	c5 	
+		push de			;080e	d5 	
+		push hl			;080f	e5 	
+		push af			;0810	f5 	
+		MCAL	ZOUTC
+		DB 	CR 
+		DB	" -"," "+0x80
+		pop af			;0817	f1 	
+		or a			;0818	b7 	
+		jr nz,1F		;0819	20 09 	
+		MCAL	ZOUTC 
+		DB	"Read"," "+0x80
+		jr 2F			;0822	18 07 	
+;
+1:		MCAL	ZOUTC 
+		DB	"Writ","e"+0x80
+;
+2:		ld a,(PHYDSC)		;082b	3a 50 fb 	
+		add a,030h		;082e	c6 30 	
+		ld (dispdiskop1),a	;0830	32 48 08 	
+		ld a,(PHYTRK)		;0833	3a 51 fb 	
+		ld hl,dispdiskop2	;0836	21 51 08 	
+		call todec		;0839	cd 62 08 	
+		ld a,(PHYSEC)		;083c	3a 52 fb 	
+		ld hl,dispdiskop3	;083f	21 5b 08 	
+		call todec		;0842	cd 62 08 	
+		MCAL	ZOUTC		;0845
+		DB	" "		;0847
+dispdiskop1:	DB	"0"		;0848
+		DB	": Track "	;0849
+dispdiskop2:	DB	"00"		;0851
+		DB	" Sector "	;0853
+dispdiskop3:	DB	"00"		;085B
+		DB	" "+0x80
+		pop hl			;085e	e1 	
+		pop de			;085f	d1 	
+		pop bc			;0860	c1 	
+		ret			;0861	c9 	
 
 ; Write out A as a two character zero-prefixed decimal
 ; HL: Output Buffer (2 bytes required)
 ;  A: Number to output
 ;
-todec:
-	ld bc,10		;0862	01 0a 00 	 
-1:	sub c			;0865	91 	
-	inc b			;0866	04 	
-	jr nc,1B		;0867	30 fc 	
-	add a,c			;0869	81 	
-	add a,030h		;086a	c6 30 	
-	inc hl			;086c	23 	
-	ld (hl),a		;086d	77 	
-	dec hl			;086e	2b 	
-	ld a,b			;086f	78 	
-	add a,02fh		;0870	c6 2f 	
-	ld (hl),a		;0872	77 	
-	ret			;0873	c9 	
+todec:		ld bc,10		;0862	01 0a 00 	 
+1:		sub c			;0865	91 	
+		inc b			;0866	04 	
+		jr nc,1B		;0867	30 fc 	
+		add a,c			;0869	81 	
+		add a,030h		;086a	c6 30 	
+		inc hl			;086c	23 	
+		ld (hl),a		;086d	77 	
+		dec hl			;086e	2b 	
+		ld a,b			;086f	78 	
+		add a,02fh		;0870	c6 2f 	
+		ld (hl),a		;0872	77 	
+		ret			;0873	c9 	
 
 ; Write out a binary representation of a number direct to console
 ;  A: The number to output
 ;
-tobin:
-	ld b,008h		;0874	06 08 	 	Loop 8 times
-1:	rlca			;0876	07 		Rotate the MSB into bit 0
-	push af			;0877	f5 	
-	push bc			;0878	c5 	
-	and 001h		;0879	e6 01 		Mask bit 0
-	add a,030h		;087b	c6 30 		Convert to ASCII digit 0 or 1
-	call dos_conout		;087d	cd 00 07 	Output
-	pop bc			;0880	c1 	
-	pop af			;0881	f1 	
-	djnz 1B			;0882	10 f2 		Loop until done
-	ret			;0884	c9 	
+tobin:		ld b,008h		;0874	06 08 	 	Loop 8 times
+1:		rlca			;0876	07 		Rotate the MSB into bit 0
+		push af			;0877	f5 	
+		push bc			;0878	c5 	
+		and 001h		;0879	e6 01 		Mask bit 0
+		add a,030h		;087b	c6 30 		Convert to ASCII digit 0 or 1
+		call dos_conout		;087d	cd 00 07 	Output
+		pop bc			;0880	c1 	
+		pop af			;0881	f1 	
+		djnz 1B			;0882	10 f2 		Loop until done
+		ret			;0884	c9 	
 
 ; Display a filename on-screen
 ;
-dispfile:
-	ld hl,var_file1		;0885	21 bd 08 	Pointer to the filename buffer
+dispfile:	ld hl,var_file1		;0885	21 bd 08 	Pointer to the filename buffer
 ;
 ; HL: Address of the filename
 ;
-dispfile_1:	
-	ld de,dispfile_2	;0888	11 ab 08 	Pointer to the output string (self-modding) 
-	ldi			;088b	ed a0 	 	Store the drive number in first
-	inc de			;088d	13 		Skip the colon
-	ld bc,00008h		;088e	01 08 00 	Write out the 8-byte filename
-	ldir			;0891	ed b0 	 
-	ld b,003h		;0893	06 03 	 	Size of the extension
-1:	inc de			;0895	13 		Increment the pointer (also skips the dot)
-	ld a,(hl)		;0896	7e 		Fetch the character
-	and 07fh		;0897	e6 7f 		The MSB of the extension is used by CP/M - strip this off
-	ld (de),a		;0899	12 		Store it
-	inc hl			;089a	23 		Skip to the next character
-	djnz 1B			;089b	10 f8 	 	And loop
-	ld a,(dispfile_2)	;089d	3a ab 08 	Get the drive number character
-	add a,02fh		;08a0	c6 2f 		Change it to an ASCII digit
-	ld (dispfile_2),a	;08a2	32 ab 08
-	MCAL	ZOUTC 		;08a5			Write out the filename
-	DB	CR 		;08a7
-	DB	" - "		;08a8
-dispfile_2:			;08ab
-	DB	"?:????????.??? -"
-	DB	" "+0x80
-	ret			;08bc	c9 	. 
+dispfile1:	ld de,dispfile2		;0888	11 ab 08 	Pointer to the output string (self-modding) 
+		ldi			;088b	ed a0 	 	Store the drive number in first
+		inc de			;088d	13 		Skip the colon
+		ld bc,00008h		;088e	01 08 00 	Write out the 8-byte filename
+		ldir			;0891	ed b0 	 
+		ld b,003h		;0893	06 03 	 	Size of the extension
+1:		inc de			;0895	13 		Increment the pointer (also skips the dot)
+		ld a,(hl)		;0896	7e 		Fetch the character
+		and 07fh		;0897	e6 7f 		The MSB of the extension is used by CP/M - strip this off
+		ld (de),a		;0899	12 		Store it
+		inc hl			;089a	23 		Skip to the next character
+		djnz 1B			;089b	10 f8 	 	And loop
+		ld a,(dispfile2)	;089d	3a ab 08 	Get the drive number character
+		add a,02fh		;08a0	c6 2f 		Change it to an ASCII digit
+		ld (dispfile2),a	;08a2	32 ab 08
+		MCAL	ZOUTC 		;08a5			Write out the filename
+		DB	CR 		;08a7
+		DB	" - "		;08a8
+dispfile2:	DB	"?:????????.??? -"
+		DB	" "+0x80
+		ret			;08bc	c9 	. 
 ;
 ; Variables, buffers and whatnot
 ;
