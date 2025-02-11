@@ -151,6 +151,8 @@ doscall2:	ld a,(STATUS)		;01f3	3a 56 fb	This is the actual DOS call
 		jp warm			;0200	c3 4e 01 
 
 ; Command: Send a file to the PC
+; Parameters from PC
+; - Filename (8 bytes name, 3 bytes extension, no seperator
 ;
 cmd_putfile:	call com_filename	;0203	cd 5c 06 	Get the filename from the PC	
 		call dispfile		;0206	cd 85 08 	Display it
@@ -185,6 +187,9 @@ cmd_putfile:	call com_filename	;0203	cd 5c 06 	Get the filename from the PC
 		jp wait			;025f	c3 57 01 	Jump back to the main loop
 
 ; Command: Get a file from the PC
+; Parameters from PC
+; - Filename (8 bytes name, 3 bytes extension, no seperator
+; 
 ;
 cmd_getfile:	call com_filename	;0262	cd 5c 06 	Get the filename from the PC	
 		call dispfile		;0265	cd 85 08 	Display it
@@ -224,14 +229,19 @@ cmd_getfile:	call com_filename	;0262	cd 5c 06 	Get the filename from the PC
 		jp wait			;02ca	c3 57 01 	Jump back to the main loop
 
 ; Command: Write a disk image to the PC
+; Parameters from PC
+; - Drive number
+; - ?
+; - Number of sectors per track (ie 20)
+; - Number of sectors to read into memory (ie 80)
 ;
 cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 		ld (PHYDSC),a		;02d0	32 50 fb
-		call com_readst		;02d3	cd 8d 07	Get ? from the PC
-		ld (var_08deh),a	;02d6	32 de 08
+		call com_readst		;02d3	cd 8d 07	Get ? from the PC - this is not used anywhere else
+		ld (var_tmp),a		;02d6	32 de 08
 		call com_readst		;02d9	cd 8d 07	Get the number of sectors from the PC
 		ld (var_numsectors),a	;02dc	32 df 08
-		call com_readst		;02df	cd 8d 07	Get the number of sectors to read into memory from PC (<=31)
+		call com_readst		;02df	cd 8d 07	Get the number of sectors to read into memory from PC
 		ld (var_memsectors),a	;02e2	32 e0 08
 		ld hl,SBUF		;02e5	21 00 0b	HL: The buffer for the sector
 		ld bc,00000h		;02e8	01 00 00	BC: The start track
@@ -288,14 +298,19 @@ cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 		jp wait			;0363	c3 57 01 	Jump back to the main loop
 
 ; Command: Get a disk image from the PC
+; Parameters from PC
+; - Drive number
+; - ?
+; - Number of sectors per track (ie 20)
+; - Number of sectors to read into memory (ie 80)
 ;
 cmd_getdisk:	call com_readst		;0366	cd 8d 07	Get the drive number from the PC
 		ld (PHYDSC),a		;0369	32 50 fb
-		call com_readst		;036c	cd 8d 07	Get ? from the PC
-		ld (var_08deh),a	;036f	32 de 08
+		call com_readst		;036c	cd 8d 07	Get ? from the PC - this is not used anywhere else
+		ld (var_tmp),a		;036f	32 de 08
 		call com_readst		;0372	cd 8d 07	Get the number of sectors from the PC
 		ld (var_numsectors),a	;0375	32 df 08
-		call com_readst		;0378	cd 8d 07	Get the number of sectors to read into memory from PC (<=31)
+		call com_readst		;0378	cd 8d 07	Get the number of sectors to read into memory from PC
 		ld (var_memsectors),a	;037b	32 e0 08
 		ld hl,SBUF		;037e	21 00 0b	HL: The buffer for the sectors
 		ld bc,00000h		;0381	01 00 00	BC: The starting track number
@@ -376,6 +391,8 @@ mos_nextsector:	ld a,(var_numsectors)	;0402	3a df 08 	Get number of sectors
 		ret			;0423	c9 
 
 ; Command: DIR
+; Parameters from PC
+; - Drive number
 ;
 cmd_getdir:	call com_readst		;0424	cd 8d 07 	Read in the drive number 
 		push af			;0427	f5 		Stack it
@@ -487,6 +504,8 @@ cmd_getdpb:	MCAL	ZOUTC 		;			Write out a message
 		jr msent		;0523	18 ba 	 	Output the success message and jump back to the main loop
 
 ; Command: Set the current disk number
+; Parameters from PC
+; - Drive number
 ;
 cmd_setdisc:	call com_readst		;0525	cd 8d 07 	Read the disk number from the PC 
 		push af			;0528	f5 		Stack the drive number
@@ -575,6 +594,8 @@ cmd_exec:	MCAL	ZOUTC 		; 			Display an acknowledgement message
 		jp wait			;05fa	c3 57 01 	
 
 ; Command: Delete file
+; Parameters from PC
+; - Filename (8 bytes name, 3 bytes extension, no seperator
 ;
 cmd_delfile:	call com_filename	;05fd	cd 5c 06	Get the filename from the PC	
 		call dispfile		;0600	cd 85 08 	Display it
@@ -593,6 +614,9 @@ cmd_delfile:	call com_filename	;05fd	cd 5c 06	Get the filename from the PC
 		jp wait			;0633	c3 57 01 	
 
 ; Command: Rename file
+; Parameters from PC
+; - Current filename (8 bytes name, 3 bytes extension, no seperator
+; - New filename (8 bytes name, 3 bytes extension, no seperator
 ;
 cmd_renfile:	call com_filename	;0636	cd 5c 06	Get the original filename from the PC in var_file1
 		call dispfile		;0639	cd 85 08 	Display it
@@ -1068,7 +1092,7 @@ var_file1:	DS	16,0	; FDESC
 var_file2:	DS	16,0	; FDESC
 		DS	1 ,0	; ?
 
-var_08deh:	DB	0	; ?
+var_tmp:	DB	0	; Doesn't seem to be used anywhere, written by cmd_getdisk and cmd_putdisk
 var_numsectors:	DB	0	; Number of sectors
 var_memsectors:	DB	0	; Number of sectors to read into memory
 var_bufstatus:	DS	31,0	; ?
