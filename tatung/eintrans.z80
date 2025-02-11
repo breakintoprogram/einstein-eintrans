@@ -227,30 +227,30 @@ cmd_getfile:	call com_filename	;0262	cd 5c 06 	Get the filename from the PC
 ;
 cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 		ld (PHYDSC),a		;02d0	32 50 fb
-		call com_readst		;02d3	cd 8d 07	
+		call com_readst		;02d3	cd 8d 07	Get ? from the PC
 		ld (var_08deh),a	;02d6	32 de 08
-		call com_readst		;02d9	cd 8d 07
+		call com_readst		;02d9	cd 8d 07	Get the number of sectors from the PC
 		ld (var_numsectors),a	;02dc	32 df 08
-		call com_readst		;02df	cd 8d 07
-		ld (var_08e0h),a	;02e2	32 e0 08
-		ld hl,SBUF		;02e5	21 00 0b
-		ld bc,00000h		;02e8	01 00 00
-		ld a,(PHYDSC)		;02eb	3a 50 fb	Select the physical disk
-		call setdisk		;02ee	cd 02 08
-		xor a			;02f1	af 		Read prefix
-		call dispdiskop		;02f2	cd 0d 08 	Display the disk operation
+		call com_readst		;02df	cd 8d 07	Get the number of sectors to read into memory from PC (<=31)
+		ld (var_memsectors),a	;02e2	32 e0 08
+		ld hl,SBUF		;02e5	21 00 0b	HL: The buffer for the sector
+		ld bc,00000h		;02e8	01 00 00	BC: The start track
+		ld a,(PHYDSC)		;02eb	3a 50 fb	 A: The disc number
+		call setdisk		;02ee	cd 02 08	Set the disk parameters
+		xor a			;02f1	af 		Set the output to 'Read'
+		call dispdiskop		;02f2	cd 0d 08 	And output the disk operation message
 ;
 1:		call com_readst		;02f5	cd 8d 07 	Read a byte in from the PC
 		cp 002h			;02f8	fe 02 	 
 		jr z,6F			;02fa	28 44 		If it is 2 then exit the loop, finished
 		ld hl,SBUF		;02fc	21 00 0b 	Set the disk buffer area 
 		ld (PHYBUF),hl		;02ff	22 53 fb 
-		ld hl,var_08e1h		;0302	21 e1 08
-		ld a,(var_08e0h)	;0305	3a e0 08 
+		ld hl,var_bufstatus	;0302	21 e1 08	HL: Buffer to store the statuses
+		ld a,(var_memsectors)	;0305	3a e0 08 	 B: Number of sectors to read in one go
 		ld b,a			;0308	47 	
 ;
-2:		xor a			;0309	af 		Read prefix
-		call dispdiskop		;030a	cd 0d 08 	Display the disk operation
+2:		xor a			;0309	af 		Set the output to 'Read'
+		call dispdiskop		;030a	cd 0d 08 	And output the disk operation message
 ;
 3:		push bc			;030d	c5 	
 		push hl			;030e	e5 	 
@@ -260,20 +260,20 @@ cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 		call mos_nextsector	;0315	cd 02 04 	Skip to the next sector 
 		pop hl			;0318	e1 	
 		pop bc			;0319	c1 	 
-		ld (hl),a		;031a	77 	 
-		inc hl			;031b	23 	 
-		dec b			;031c	05 	 
-		jr z,4F			;031d	28 0b 	 
-		or a			;031f	b7 	 
-		jr nz,2B		;0320	20 e7 	   
-		ld a,(PHYSEC)		;0322	3a 52 fb  
-		or a			;0325	b7 	 
-		jr nz,3B		;0326	20 e5 	 
-		jr 2B			;0328	18 df 	 
+		ld (hl),a		;031a	77 	 	Store the status in the buffer
+		inc hl			;031b	23 	 	Increment the status buffer counter
+		dec b			;031c	05
+		jr z,4F			;031d	28 0b 	 	If we're at the end then skip to the end
+		or a			;031f	b7 	 	If there was an error skipping to the next sector
+		jr nz,2B		;0320	20 e7 	   	Then retry
+		ld a,(PHYSEC)		;0322	3a 52 fb  	If we've not incremented to the next track (sector resets to 0)
+		or a			;0325	b7 	 	
+		jr nz,3B		;0326	20 e5 	 	Then inner loop
+		jr 2B			;0328	18 df 	 	Outer loop
 
-4:		call sub_0676h		;032a	cd 76 06 
-		ld hl,SBUF		;032d	21 00 0b 
-		ld a,(var_08e0h)	;0330	3a e0 08
+4:		call com_writedstat	;032a	cd 76 06 	Write the disk stat buffer back to the PC
+		ld hl,SBUF		;032d	21 00 0b 	Write the disk data buffer back to the PC
+		ld a,(var_memsectors)	;0330	3a e0 08
 		ld b,a			;0333	47
 5:		push bc			;0334	c5 	
 		ld bc,0200h		;0335	01 00 02 	 
@@ -289,60 +289,60 @@ cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 
 ; Command: Get a disk image from the PC
 ;
-cmd_getdisk:	call com_readst		;0366	cd 8d 07
+cmd_getdisk:	call com_readst		;0366	cd 8d 07	Get the drive number from the PC
 		ld (PHYDSC),a		;0369	32 50 fb
-		call com_readst		;036c	cd 8d 07
+		call com_readst		;036c	cd 8d 07	Get ? from the PC
 		ld (var_08deh),a	;036f	32 de 08
-		call com_readst		;0372	cd 8d 07
-		ld (var_numsectors),a	;0375	32 df 08	; Number of sectors
-		call com_readst		;0378	cd 8d 07
-		ld (var_08e0h),a	;037b	32 e0 08
-		ld hl,SBUF		;037e	21 00 0b
-		ld bc,00000h		;0381	01 00 00
-		ld a,(PHYDSC)		;0384	3a 50 fb
-		call setdisk		;0387	cd 02 08
-		ld a,001h		;038a	3e 01 	
-		call dispdiskop		;038c	cd 0d 08 	 
+		call com_readst		;0372	cd 8d 07	Get the number of sectors from the PC
+		ld (var_numsectors),a	;0375	32 df 08
+		call com_readst		;0378	cd 8d 07	Get the number of sectors to read into memory from PC (<=31)
+		ld (var_memsectors),a	;037b	32 e0 08
+		ld hl,SBUF		;037e	21 00 0b	HL: The buffer for the sectors
+		ld bc,00000h		;0381	01 00 00	BC: The starting track number
+		ld a,(PHYDSC)		;0384	3a 50 fb	 A: The disc number
+		call setdisk		;0387	cd 02 08	Set the disk information
+		ld a,001h		;038a	3e 01 		Set the output to 'Write'
+		call dispdiskop		;038c	cd 0d 08 	And output the disk operation message
 ;
-1:		call com_readst		;038f	cd 8d 07 	 
-		cp 002h			;0392	fe 02 	 
-		jr z,6F			;0394	28 45 	
-		ld hl,SBUF		;0396	21 00 0b 	  
-		ld a,(var_08e0h)	;0399	3a e0 08 	  
-		ld b,a			;039c	47 
+1:		call com_readst		;038f	cd 8d 07 	Get the response from the PC 
+		cp 002h			;0392	fe 02 	 	Is it 2?
+		jr z,6F			;0394	28 45 		Yes, so end this operation
+		ld hl,SBUF		;0396	21 00 0b 	HL: Buffer to store the sector data in
+		ld a,(var_memsectors)	;0399	3a e0 08 	
+		ld b,a			;039c	47 		 B: Number of sectors to read in one go
 2:		push bc			;039d	c5 	
-		ld bc,0200h		;039e	01 00 02 	 
-		call com_readbuf	;03a1	cd c6 06 	 
+		ld bc,0200h		;039e	01 00 02 	Read 512 bytes into the buffer
+		call com_readbuf	;03a1	cd c6 06 	from the PC
 		pop bc			;03a4	c1 	
-		djnz 2B			;03a5	10 f6 	 
-		ld hl,SBUF		;03a7	21 00 0b 	 
-		ld (PHYBUF),hl		;03aa	22 53 fb 
-		ld a,(var_08e0h)	;03ad	3a e0 08   
-		ld b,a			;03b0	47 	 
-		ld hl,var_08e1h		;03b1	21 e1 08  
-3:		ld a,001h		;03b4	3e 01 
-		call dispdiskop		;03b6	cd 0d 08 	 
+		djnz 2B			;03a5	10 f6 	 	Loop unti the required number of sectors have been read into memory
+		ld hl,SBUF		;03a7	21 00 0b 	HL: The buffer for the sectors
+		ld (PHYBUF),hl		;03aa	22 53 fb 	
+		ld a,(var_memsectors)	;03ad	3a e0 08  
+		ld b,a			;03b0	47 	 	 B: The number of sectors stored in memory
+		ld hl,var_bufstatus	;03b1	21 e1 08  	HL: Buffer to store the statuses
+3:		ld a,001h		;03b4	3e 01 		Set the output to 'Write'
+		call dispdiskop		;03b6	cd 0d 08 	And output the disk operation message
 4:		push hl			;03b9	e5
 		push bc			;03ba	c5
 		xor a			;03bb	af
-		ld (STATUS),a		;03bc	32 56 fb 	
+		ld (STATUS),a		;03bc	32 56 fb 	Clear the status
 		MCAL ZWSECT		;			Write a single 512-byte sector out
-		call mos_nextsector	;03c1	cd 02 04 	Skip to the next sector 
+		call mos_nextsector	;03c1	cd 02 04 	Attempt to move the disk to the next sector 
 		pop bc			;03c4	c1 
 		pop hl			;03c5	e1 
-		ld (hl),a		;03c6	77 
-		inc hl			;03c7	23 
+		ld (hl),a		;03c6	77 		Store the status in the buffer
+		inc hl			;03c7	23 		Increment the status buffer counter
 		dec b			;03c8	05 
-		jr z,5F			;03c9	28 0b 	
-		or a			;03cb	b7 	
-		jr nz,3B		;03cc	20 e6 	  
-		ld a,(PHYSEC)		;03ce	3a 52 fb 	
+		jr z,5F			;03c9	28 0b 		If we're at the end then skip to the end
+		or a			;03cb	b7 		If there was an error skipping to the next sector
+		jr nz,3B		;03cc	20 e6 	 	Then retry
+		ld a,(PHYSEC)		;03ce	3a 52 fb 	If we've not incremented to the next track (sector resets to 0)
 		or a			;03d1	b7 	
-		jr nz,4B		;03d2	20 e5 	 
-		jr 3B			;03d4	18 de 	 
+		jr nz,4B		;03d2	20 e5 	 	Then inner loop
+		jr 3B			;03d4	18 de 	 	Outer loop
 ;
-5:		call sub_0676h		;03d6	cd 76 06 
-		jr 1B			;03d9	18 b4 	 
+5:		call com_writedstat	;03d6	cd 76 06 	Write the disk stat buffer back to the PC
+		jr 1B			;03d9	18 b4 	 	And loop
 
 6:		MCAL	ZOUTC
 		DB	CR
@@ -350,6 +350,9 @@ cmd_getdisk:	call com_readst		;0366	cd 8d 07
 		jp wait			;03ff	c3 57 01 
 
 ; Move the drive onto the next sector, track
+; Returns:
+;  A: 0 if there are no issues, otherwise the error code
+;  F: As above
 ;
 mos_nextsector:	ld a,(var_numsectors)	;0402	3a df 08 	Get number of sectors
 		ld hl,(PHYTRK)		;0405	2a 51 fb 	Get current sector (H) and track (L)
@@ -628,8 +631,10 @@ com_filename1:	push hl			;065f	e5 		Stack the buffer address
 		ld (hl),a		;0674	77 		
 		ret			;0675	c9 		And return
 
-sub_0676h:	ld hl,var_08e1h		;0676	21 e1 08 	
-		ld a,(var_08e0h)	;0679	3a e0 08 	
+; Write disk stats from cmd_getdisk and cmd_putdisk to the PC
+;
+com_writedstat:	ld hl,var_bufstatus	;0676	21 e1 08 	HL: Address of the status buffer
+		ld a,(var_memsectors)	;0679	3a e0 08 	BC: Number of bytes to send
 		ld c,a			;067c	4f 	
 		ld b,000h		;067d	06 00 	 
 ;
@@ -1063,9 +1068,7 @@ var_file1:	DS	16,0	; FDESC
 var_file2:	DS	16,0	; FDESC
 		DS	1 ,0	; ?
 
-var_08deh:	DB	0
-var_numsectors:	DB	0
-var_08e0h:	DB	0
-var_08e1h:	DS	7,0
-var_08e8h:	DS	3,0
-var_08ebh:	DS	21,0
+var_08deh:	DB	0	; ?
+var_numsectors:	DB	0	; Number of sectors
+var_memsectors:	DB	0	; Number of sectors to read into memory
+var_bufstatus:	DS	31,0	; ?
