@@ -3,10 +3,11 @@
 # Title:		EinTrans
 # Author:		Dean Belfield
 # Created:		05/02/2025
-# Last Updated:	06/02/2025
+# Last Updated:	11/02/2025
 #
 # Modinfo:
 # 06/02/2025:	Added file transfer methods
+# 11/02/2025	Fixed DIR statistics
 
 import serial
 import time
@@ -28,7 +29,7 @@ class DPB:
 		self.checkVector = buffer[11] + (buffer[12] << 8)
 		self.systemTracks = buffer[13] + (buffer[14] << 8)
 		self.blockSize = 128 << self.blockShift
-
+		
 	def getSize(self):
 		return (self.diskSize + 1) * self.blockSize
 
@@ -56,8 +57,7 @@ class Dir:
 		self.driveConfig = None 
 		self.dpb = None 
 		self.entries = []
-		self.size = 0
-		self.used = 0
+		self.__used = 0
 
 	def findFile(self, drive, filename, extension):
 		for file in self.entries:
@@ -67,16 +67,21 @@ class Dir:
 
 	def append(self, drive, file):
 		blockSize = self.dpb.blockSize
-		self.size += file.size
-		self.used += math.ceil(file.size/blockSize)*blockSize
+		self.__used += math.ceil(file.size / blockSize) * blockSize
 		f = self.findFile(drive, file.filename, file.extension)
 		if f == None:
 			self.entries.append(file)
 		else:
-			f.size += file.size 
+			f.size += file.size
+
+	def used(self):
+		return self.__used
+
+	def free(self):
+		return self.total() - self.used()
 
 	def total(self):
-		if(self.dpb != None):
+		if self.dpb != None:
 			return self.dpb.getSize()
 		return 0
 
@@ -244,20 +249,12 @@ class Transfer(Protocol):
 s = Transfer(port)	# Open the serial port
 
 res = s.reset()		# Send a reset command to EinTrans
-dir = s.getDIR(1)	# Get the directory
+dir = s.getDIR(0)	# Get the directory
 
 # Iterate through the directory and get the files from the Einstein
-# My drives should return
-#
-# 0: 168K Size, 620K Free, 790K Total
-# 1: 106K Size,  82K Free, 190K Total
-#
-# Total file sizes are also reporting low
 #
 for file in dir.entries:
 	print(f"{file.drive}:{file.filename}.{file.extension} = {file.size}")
-used = dir.used // 1024
-total = dir.total() // 1024
-print(f"{used}K Size, {total - used}K Free, {total}K Total")
+print(f"{dir.used() // 1024}K Size, {dir.free() // 1024}K Free, {dir.total() // 1024}K Total")
 
 s.close()			# Close the serial port
