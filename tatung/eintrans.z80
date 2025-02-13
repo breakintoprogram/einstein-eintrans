@@ -232,7 +232,7 @@ cmd_getfile:	call com_filename	;0262	cd 5c 06 	Get the filename from the PC
 ; Parameters from PC
 ; - Drive number
 ; - ?
-; - Number of sectors per track (ie 20)
+; - Number of sectors per track (ie 20 for Disk 0, 10 for Disk 1)
 ; - Number of sectors to read into memory (ie 80)
 ;
 cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
@@ -301,8 +301,8 @@ cmd_putdisk:	call com_readst		;02cd	cd 8d 07 	Get the drive number from the PC
 ; Parameters from PC
 ; - Drive number
 ; - ?
-; - Number of sectors per track (ie 20)
-; - Number of sectors to read into memory (ie 80)
+; - Number of sectors per track
+; - Number of sectors to read into memory
 ;
 cmd_getdisk:	call com_readst		;0366	cd 8d 07	Get the drive number from the PC
 		ld (PHYDSC),a		;0369	32 50 fb

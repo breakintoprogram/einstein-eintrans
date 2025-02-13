@@ -3,11 +3,12 @@
 # Title:		EinTrans
 # Author:		Dean Belfield
 # Created:		05/02/2025
-# Last Updated:	11/02/2025
+# Last Updated:	13/02/2025
 #
 # Modinfo:
 # 06/02/2025:	Added file transfer methods
-# 11/02/2025	Fixed DIR statistics
+# 11/02/2025:	Fixed DIR statistics
+# 13/02/2025:	Stubbed getDiskImage
 
 import serial
 import time
@@ -19,7 +20,7 @@ port = '/dev/ttyWCH0'
 #
 class DPB:
 	def __init__(self, buffer):
-		self.logicalSectorsPerTrack = buffer[0] + (buffer[6] << 1)
+		self.logicalSectorsPerTrack = buffer[0]
 		self.blockShift = buffer[2]
 		self.blockMask = buffer[3]
 		self.blockingFlag = buffer[4]
@@ -29,6 +30,8 @@ class DPB:
 		self.checkVector = buffer[11] + (buffer[12] << 8)
 		self.systemTracks = buffer[13] + (buffer[14] << 8)
 		self.blockSize = 128 << self.blockShift
+		self.physicalSectorsPerTrack = self.logicalSectorsPerTrack >> 2
+		self.physicalTracks = (((self.diskSize + 1) * 16) // self.logicalSectorsPerTrack) + self.systemTracks
 		
 	def getSize(self):
 		return (self.diskSize + 1) * self.blockSize
@@ -98,9 +101,7 @@ class RS232:
 		while True:
 			if self.serial.cts:
 				break
-		count = self.serial.write(data)
-		time.sleep(0.001)
-		return count 
+		return self.serial.write(data)
 	
 	def read(self, size = None):
 		return self.serial.read(size)
@@ -172,7 +173,7 @@ class Protocol(RS232):
 #
 class Transfer(Protocol):
 	def __init__(self, port):
-		super().__init__(port, 9600, 8, "N", 2, 10)
+		super().__init__(port, 9600, 8, "N", 2)
 
 	def reset(self):
 		self.sendCmd(0x25)
@@ -208,6 +209,31 @@ class Transfer(Protocol):
 			else:
 				break 
 		return dir
+	
+	def getDiskImage(self, dir, filename):
+		fh = open(f"{filename}", 'wb')		
+		sectorCount = 80	# Number of sectors for Einstein to buffer
+		sectorSize = 512	# Size of the physical sectors
+		sectorsPerTrack = dir.dpb.physicalSectorsPerTrack
+		tracks = dir.dpb.physicalTracks
+		self.sendCmd(0x72, dir.drive, sectorCount, sectorsPerTrack, sectorCount)
+		track = 0
+		sector = 0		
+		while track < tracks:
+			print(f"* Read Track {track} Sector {sector}")
+			self.writeByte(0)
+			buffer_status = self.getBuffer(sectorCount)			# Read in the statuses for all the sectors read
+			for status in buffer_status:
+				if status !=0:
+					print(f"> Read Track {track} Sector {sector} = ERROR")
+				buffer = self.getBuffer(sectorSize)				# Then read it in
+				fh.write(buffer)								# And write out to disk
+				sector += 1
+				if sector >= sectorsPerTrack:
+					sector = 0
+					track += 1
+		self.writeByte(2)
+		fh.close()
 	
 	def getFile(self, drive, filename, extension):
 		self.sendCmd(0x52)
@@ -256,5 +282,9 @@ dir = s.getDIR(0)	# Get the directory
 for file in dir.entries:
 	print(f"{file.drive}:{file.filename}.{file.extension} = {file.size}")
 print(f"{dir.used() // 1024}K Size, {dir.free() // 1024}K Free, {dir.total() // 1024}K Total")
+
+# Get the disk image
+#
+# s.getDiskImage(dir, "test.dsk")
 
 s.close()			# Close the serial port
